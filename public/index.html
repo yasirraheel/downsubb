@@ -46,7 +46,10 @@ img{max-width:100%;height:auto}
 .main-form-box,.downloader-block,.site-info-tabs{max-width:100%;box-sizing:border-box}
 .site-info-tabs{width:min(1240px,94vw)!important}
 .downloader-2 .link-form{width:min(980px,94vw)!important}
-.header_v2{max-width:1240px!important;position:sticky!important;top:0;z-index:100;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.header_v2{width:100%!important;max-width:none!important;position:fixed!important;top:0;left:0;right:0;z-index:100;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.header_v2 .page-width-inner{max-width:1240px!important;margin:0 auto}
+body{padding-top:63px}
+@media (max-width:768px){body{padding-top:44px}}
 .how-to-use-v2{font-size:18px;line-height:32px}
 .header_v2 .logo{background-image:url(/img/logo_small2.svg?v=9)}
 .downloader-2.downloader-2-part1{padding-top:0!important}

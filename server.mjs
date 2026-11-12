@@ -393,11 +393,19 @@ const server = http.createServer(async (req, res) => {
       const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url]);
       const j = JSON.parse(out);
       if (j.duration && j.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(j.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
-      const formats = []; const seen = new Set();
+      // Labels use the shorter side mapped to the nearest standard
+      // resolution (a 1080x1300 portrait clip is "1080p", not "1300p").
+      // The real height is kept for the download filter; labels dedupe.
+      const STD = [2160, 1440, 1080, 720, 480, 360, 240];
+      const nearestStd = v => STD.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+      const formats = [];
       for (const f of (j.formats || [])) {
         if (!f.height || f.height < 144 || !f.ext || !['mp4', 'webm'].includes(f.ext) || f.vcodec === 'none') continue;
-        const key = `${f.height}p`; if (seen.has(key)) continue; seen.add(key);
-        formats.push({ label: `${f.height}p`, height: f.height });
+        const short = (f.width && f.height) ? Math.min(f.width, f.height) : f.height;
+        const label = `${nearestStd(short)}p`;
+        const prev = formats.find(x => x.label === label);
+        if (prev) { if (f.height > prev.height) prev.height = f.height; continue; }
+        formats.push({ label, height: f.height });
       }
       formats.sort((a, b) => b.height - a.height);
       sendJson(res, 200, { title: j.title, uploader: j.uploader || j.channel || '', duration: j.duration || 0, thumbnail: j.thumbnail || '', platform: detectPlatform(url), formats: formats.slice(0, 6), hasAudio: true, ffmpeg: HAS_FFMPEG });
