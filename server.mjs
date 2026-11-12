@@ -216,7 +216,11 @@ const server = http.createServer(async (req, res) => {
       if (!f.startsWith(publicDir) || !fs.existsSync(f) || !fs.statSync(f).isFile()) {
         res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
       }
-      res.writeHead(200, { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res); return;
+      // JS/CSS must never be cached long: a cached old subdown.js kept
+      // showing the old left-aligned layout after fixes were deployed.
+      const headers = { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' };
+      if (/\.(js|css)$/.test(f)) headers['Cache-Control'] = 'no-cache, must-revalidate';
+      res.writeHead(200, headers); fs.createReadStream(f).pipe(res); return;
     }
     if (req.method === 'POST' && u.pathname === '/') {
       // A native form submit (JS off) lands here — show the homepage, never a blank 404.
