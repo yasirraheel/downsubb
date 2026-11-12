@@ -6,15 +6,15 @@
   var result = document.getElementById('sf_result');
   if (!form || !input || !result) return;
   function esc(s){ return String(s||'').replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
-  function show(html){ result.innerHTML = html; }
+  function show(html){ result.style.maxWidth='960px'; result.style.margin='0 auto'; result.style.width='100%'; result.style.boxSizing='border-box'; result.innerHTML = html; }
   function errorBox(msg){
-    show('<div style="margin:16px 0;padding:16px 18px;border:1px solid #f5c2c7;border-left:5px solid #dc3545;border-radius:10px;background:#fff5f5;text-align:left;max-width:640px">' +
+    show('<div style="margin:16px auto;padding:16px 18px;width:100%;box-sizing:border-box;border:1px solid #f5c2c7;border-left:5px solid #dc3545;border-radius:10px;background:#fff5f5;text-align:left">' +
       '<div style="font-size:18px;font-weight:700;color:#842029;margin-bottom:6px">Couldn\'t download this video</div>' +
       '<div style="font-size:15px;color:#5b2a2e;line-height:1.5">' + esc(msg) + '</div>' +
       '<div style="font-size:13px;color:#8a6d6d;margin-top:10px">Tip: copy the link again from the video page and make sure it opens in your browser first, then try again.</div></div>');
   }
   function statusBox(msg){
-    show('<div style="margin:16px 0;padding:14px 18px;border:1px solid #d9e8d9;border-left:5px solid #84bd07;border-radius:10px;background:#f6fbf0;text-align:left;max-width:640px">' +
+    show('<div style="margin:16px auto;padding:14px 18px;width:100%;box-sizing:border-box;border:1px solid #d9e8d9;border-left:5px solid #84bd07;border-radius:10px;background:#f6fbf0;text-align:left">' +
       '<div style="font-size:15px;color:#2f4d0a">' + esc(msg) + '</div></div>');
   }
   form.addEventListener('submit', async function (e) {
