@@ -202,3 +202,8 @@
     });
   });
 })();
+
+  // Mobile menu: hamburger toggles the header nav.
+  var menuBtn = document.querySelector('.menu-btn');
+  if (menuBtn) menuBtn.addEventListener('click', function () { document.body.classList.toggle('sd-nav-open'); });
+  document.querySelectorAll('#nav_top a').forEach(function (a) { a.addEventListener('click', function () { document.body.classList.remove('sd-nav-open'); }); });

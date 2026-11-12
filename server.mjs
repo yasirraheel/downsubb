@@ -321,11 +321,11 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host}`);
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
-      res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
+      res.writeHead(200, { 'Content-Type': mime['.html'], 'Cache-Control': 'no-cache, must-revalidate' }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
     }
     if (req.method === 'GET' && (u.pathname === '/terms' || u.pathname === '/privacy')) {
       const f = path.join(publicDir, u.pathname.slice(1) + '.html');
-      res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(f).pipe(res); return;
+      res.writeHead(200, { 'Content-Type': mime['.html'], 'Cache-Control': 'no-cache, must-revalidate' }); fs.createReadStream(f).pipe(res); return;
     }
     if (req.method === 'GET' && !u.pathname.startsWith('/api/')) {
       // Static assets from public/ (exact template design: /build, /img, /font, /js, /subdown.js)
@@ -339,7 +339,7 @@ const server = http.createServer(async (req, res) => {
       // JS/CSS must never be cached long: a cached old subdown.js kept
       // showing the old left-aligned layout after fixes were deployed.
       const headers = { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' };
-      if (/\.(js|css)$/.test(f)) headers['Cache-Control'] = 'no-cache, must-revalidate';
+      if (/\.(js|css|html)$/.test(f)) headers['Cache-Control'] = 'no-cache, must-revalidate';
       res.writeHead(200, headers); fs.createReadStream(f).pipe(res); return;
     }
     if (req.method === 'POST' && u.pathname === '/') {
