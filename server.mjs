@@ -174,12 +174,14 @@ function parseProgress(job, text) {
 function runYtDlpJob(job, jobDir) {
   const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
   const p = spawn(YTDLP, [...BASE_ARGS, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+  job.proc = p;
   let err = '';
   p.stdout.on('data', d => parseProgress(job, d.toString()));
   p.stderr.on('data', d => { err += d; parseProgress(job, err); });
   p.on('error', e => { job.status = 'error'; job.error = `yt-dlp not found at ${YTDLP}. (${e.message})`; });
   p.on('close', code => {
-    if (job.status === 'error') return;
+    job.proc = null;
+    if (job.status === 'error' || job.status === 'cancelled') return;
     if (code !== 0) { job.status = 'error'; job.error = friendlyError(err || `yt-dlp exited with code ${code}`); return; }
     finishJob(job, jobDir, null);
   });
@@ -200,10 +202,11 @@ function startJob(url, quality) {
     const outFile = path.join(jobDir, `video.${ext === 'm3u8' ? 'mp4' : ext}`);
     const args = ['-y', '-user_agent', 'Mozilla/5.0', '-i', url, '-c', 'copy', outFile];
     const p = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+    job.proc = p;
     let err = '';
     p.stderr.on('data', d => { err += d; const m = err.match(/time=(\d+):(\d+):(\d+)/g); if (m) job.progress = 50; });
     p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
-    p.on('close', code => { if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
+    p.on('close', code => { job.proc = null; if (job.status === 'cancelled') return; if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
     return job;
   }
   runYtDlpJob(job, jobDir);
@@ -258,8 +261,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, headers); fs.createReadStream(f).pipe(res); return;
     }
     if (req.method === 'POST' && u.pathname === '/') {
-      // A native form submit (JS off) lands here — show the homepage, never a blank 404.
-      res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
+      // A native form submit (JS off) lands here. Redirect (303) to a
+      // plain GET so a later refresh never shows Chrome's
+      // "Confirm Form Resubmission" dialog.
+      res.writeHead(303, { Location: '/' }); res.end(); return;
     }
     if (req.method === 'POST' && u.pathname === '/api/info') {
       const { url } = JSON.parse(await readBody(req) || '{}');
@@ -313,6 +318,19 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       sendJson(res, 200, { jobId: job.id, status: job.status, progress: job.progress, error: job.error, size: job.size, name: job.name });
+      return;
+    }
+    // Cancel a download: stop the running yt-dlp/ffmpeg and delete its files.
+    if (req.method === 'DELETE' && u.pathname.startsWith('/api/jobs/')) {
+      const parts = u.pathname.split('/').filter(Boolean);
+      const job = jobs.get(parts[2]);
+      if (!job) return sendJson(res, 404, { error: 'Job not found or expired.' });
+      job.status = 'cancelled';
+      try { if (job.proc) job.proc.kill('SIGKILL'); } catch {}
+      const dir = path.join(jobsDir, job.id);
+      jobs.delete(job.id);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      sendJson(res, 200, { ok: true, status: 'cancelled' });
       return;
     }
     // Direct download (local / VPS use; may hit Hostinger's 120s limit on big files — prefer /api/jobs)

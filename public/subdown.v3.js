@@ -15,6 +15,7 @@
     '.sd-error{margin:16px auto;padding:16px 18px;border:1px solid #f5c2c7;border-left:5px solid #dc3545;border-radius:10px;background:#fff5f5;text-align:left}' +
     '.sd-spin{width:26px;height:26px;min-width:26px;border:3px solid #d9e8d9;border-top-color:#84bd07;border-radius:50%;animation:sd-rot 1s linear infinite}' +
     '@keyframes sd-rot{to{transform:rotate(360deg)}}' +
+    '.sd-cancel{display:inline-block;margin:5px;padding:10px 18px;cursor:pointer;border:2px solid #dc3545;border-radius:8px;background:#fff;color:#b02a37;font-size:14px;font-weight:700}' +
     '.sd-dl{display:inline-block;margin-top:10px;padding:13px 26px;background:#84bd07;color:#fff!important;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
@@ -52,7 +53,8 @@
     box.innerHTML = '<div style="font-size:16px;font-weight:700;margin-bottom:4px">Your downloads</div>' + rows;
     q.forEach(function (e) { pollQueueEntry(e); });
   }
-  async function pollQueueEntry(e){
+  async function pollQueueEntry(e, fails){
+    fails = fails || 0;
     var row = document.querySelector('[data-job="' + e.jobId + '"]');
     if (!row) return;
     var stEl = row.querySelector('.sd-qstatus'), actEl = row.querySelector('.sd-qact');
@@ -66,13 +68,24 @@
       } else if (j.status === 'error') {
         stEl.textContent = 'Interrupted';
         actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>';
+      } else if (j.status === 'cancelled') {
+        stEl.textContent = 'Cancelled';
+        actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>';
       } else {
         stEl.innerHTML = '<span class="sd-spin" style="display:inline-block;vertical-align:-7px;width:18px;height:18px;min-width:18px"></span> Downloading... ' + (j.progress || 0) + '%';
-        setTimeout(function () { pollQueueEntry(e); }, 3000);
+        actEl.innerHTML = '<button type="button" class="sd-cancel" style="padding:9px 14px" data-cancel="' + esc(e.jobId) + '">Cancel</button>';
+        setTimeout(function () { pollQueueEntry(e, 0); }, 3000);
       }
     } catch (err) {
-      stEl.textContent = 'Expired - start it again from the link above';
-      actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>';
+      // Network lost or server hiccup: the download keeps running on the
+      // server, so keep retrying instead of declaring it dead.
+      if (fails < 5) {
+        stEl.textContent = 'Connection lost, retrying...';
+        setTimeout(function () { pollQueueEntry(e, fails + 1); }, 3000);
+      } else {
+        stEl.textContent = 'Expired - start it again from the link above';
+        actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>';
+      }
     }
   }
   document.addEventListener('click', async function (ev) {
@@ -83,6 +96,23 @@
     if (!e) return;
     input.value = e.url; form.dispatchEvent(new Event('submit', { cancelable: true }));
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  var timers = {}; // jobId -> interval id
+  function stopPoll(jobId){ if (timers[jobId]) { clearInterval(timers[jobId]); delete timers[jobId]; } }
+  async function cancelJob(jobId){
+    stopPoll(jobId);
+    try { await fetch('/api/jobs/' + jobId, { method: 'DELETE' }); } catch (e) {}
+    saveQueue(loadQueue().filter(function (x) { return x.jobId !== jobId; }));
+    renderQueue();
+  }
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-cancel]') : null;
+    if (!b) return;
+    var id = b.getAttribute('data-cancel');
+    var stEl = document.getElementById('sd-status');
+    if (stEl) stEl.innerHTML = '<div class="sd-status">Download cancelled.</div>';
+    cancelJob(id);
   });
 
   var form = document.getElementById('sf_form');
@@ -136,22 +166,30 @@
           if (!jr.ok) throw new Error(job.error || 'Download failed to start.');
           addToQueue({ jobId: job.jobId, url: url, title: info.title || 'Video', quality: b.getAttribute('data-q'), createdAt: Date.now() });
         } catch (err) { errorBox(err.message); return; }
-        var timer = setInterval(async function () {
+        timers[job.jobId] = setInterval(async function () {
           try {
             var pr = await fetch('/api/jobs/' + job.jobId);
-            if (!pr.ok) { clearInterval(timer); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
+            if (!pr.ok) { stopPoll(job.jobId); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
             var j = await pr.json();
-            if (!j.status) { clearInterval(timer); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
+            if (!j.status) { stopPoll(job.jobId); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
             if (j.status === 'ready') {
-              clearInterval(timer);
+              stopPoll(job.jobId);
               stEl.innerHTML = '<a class="sd-dl" href="/api/jobs/' + j.jobId + '/file">Download ' + esc(j.name || 'video') + ' (' + Math.round((j.size || 0) / 1048576 * 10) / 10 + ' MB)</a>';
+              renderQueue();
             } else if (j.status === 'error') {
-              clearInterval(timer);
+              stopPoll(job.jobId);
               errorBox(j.error || 'Download failed.');
+            } else if (j.status === 'cancelled') {
+              stopPoll(job.jobId);
+              stEl.innerHTML = '<div class="sd-status">Download cancelled.</div>';
             } else {
-              stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Downloading on the server... ' + (j.progress || 0) + '%</span></div>';
+              stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Downloading on the server... ' + (j.progress || 0) + '%</span><button type="button" class="sd-cancel" data-cancel="' + esc(job.jobId) + '">Cancel</button></div>';
             }
-          } catch (err) { clearInterval(timer); errorBox('Connection lost. Please try again.'); }
+          } catch (err) {
+            // Network lost: the server keeps downloading, so just keep
+            // polling instead of showing an error and giving up.
+            stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Connection lost, retrying... the server keeps downloading.</span></div>';
+          }
         }, 2000);
       });
     });
