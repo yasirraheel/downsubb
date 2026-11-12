@@ -11,7 +11,12 @@
   // cached stylesheet: centred result, spinner, professional buttons.
   var css = '#sf_result{max-width:960px;margin:0 auto;width:100%;box-sizing:border-box;text-align:center;padding:0 12px}' +
     '.sd-card{margin:18px auto;padding:22px 20px;border:1px solid #e3e8e3;border-radius:14px;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.06);text-align:center}' +
-    '.sd-card img{max-width:320px;max-height:240px;width:auto;height:auto;object-fit:contain;border-radius:10px;display:block;margin:0 auto 14px}' +
+    '.sd-card img{max-width:320px;max-height:240px;width:auto;height:auto;object-fit:contain;border-radius:10px;display:block;margin:0 auto 14px;background:#eef1ee}' +
+    '.sd-skel{margin:18px auto;padding:22px 20px;border:1px solid #e3e8e3;border-radius:14px;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.06);text-align:center}' +
+    '.sd-skel-thumb{width:320px;max-width:100%;height:180px;margin:0 auto 14px;border-radius:10px;background:#eef1ee;display:flex;align-items:center;justify-content:center;animation:sd-pulse 1.4s ease-in-out infinite}' +
+    '.sd-skel-line{height:14px;border-radius:7px;background:#eef1ee;margin:0 auto 10px;animation:sd-pulse 1.4s ease-in-out infinite}' +
+    '.sd-skel-btn{display:inline-block;width:86px;height:40px;border-radius:8px;background:#eef1ee;margin:5px;animation:sd-pulse 1.4s ease-in-out infinite}' +
+    '@keyframes sd-pulse{0%,100%{opacity:1}50%{opacity:.55}}' +
     '.sd-card h3{font-size:20px;line-height:1.4;margin:0 0 6px;color:#222}' +
     '.sd-meta{font-size:14px;color:#777;margin:0 0 14px}' +
     '.sd-q{display:inline-block;margin:5px;padding:11px 20px;cursor:pointer;border:none;border-radius:8px;background:#84bd07;color:#fff;font-size:15px;font-weight:700}' +
@@ -155,11 +160,23 @@
   function statusBox(msg){
     show('<div class="sd-status"><span class="sd-spin"></span><span>' + esc(msg) + '</span></div>');
   }
+  // Preview loading placeholder: a skeleton of the result card (grey
+  // thumbnail block with a spinner, title lines, quality buttons) so
+  // the user can see at once that the preview is loading.
+  function loadingBox(){
+    show('<div class="sd-skel">' +
+      '<div class="sd-skel-thumb"><span class="sd-spin"></span></div>' +
+      '<div class="sd-skel-line" style="width:70%"></div>' +
+      '<div class="sd-skel-line" style="width:40%"></div>' +
+      '<div style="margin-top:14px"><span class="sd-skel-btn"></span><span class="sd-skel-btn"></span><span class="sd-skel-btn"></span></div>' +
+      '<div style="font-size:14px;color:#777;margin-top:14px">Loading preview...</div>' +
+      '</div>');
+  }
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
     var url = input.value.trim();
     if (!url) { errorBox('Please paste a video link first.'); return; }
-    statusBox('Checking the video, please wait...');
+    loadingBox();
     var info;
     try {
       var r = await fetch('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) });
@@ -182,7 +199,7 @@
     result.querySelectorAll('button[data-q]').forEach(function (b) {
       b.addEventListener('click', async function () {
         var stEl = document.getElementById('sd-status');
-        stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Downloading on the server, please wait...</span></div>';
+        stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Preparing your download, please wait...</span></div>';
         var job;
         try {
           var jr = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url, quality: b.getAttribute('data-q') }) });
@@ -209,12 +226,12 @@
               stopPoll(job.jobId);
               stEl.innerHTML = '<div class="sd-status">Download cancelled.</div>';
             } else {
-              stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Downloading on the server... ' + (j.progress || 0) + '%</span><button type="button" class="sd-cancel" data-cancel="' + esc(job.jobId) + '">Cancel</button></div>';
+              stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Preparing your download... ' + (j.progress || 0) + '%</span><button type="button" class="sd-cancel" data-cancel="' + esc(job.jobId) + '">Cancel</button></div>';
             }
           } catch (err) {
             // Network lost: the server keeps downloading, so just keep
             // polling instead of showing an error and giving up.
-            stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Connection lost, retrying... the server keeps downloading.</span></div>';
+            stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Connection lost, retrying... your download will continue.</span></div>';
           }
         }, 2000);
       });

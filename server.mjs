@@ -113,9 +113,9 @@ function runYtDlp(args, timeoutMs = 120000) {
 }
 function friendlyError(raw) {
   const s = raw.toLowerCase();
-  if (s.includes('not available in your country') || s.includes('blocked in your country')) return 'This video is not available in the server country either. A server in an allowed country is needed for this link.';
-  if (s.includes('private video') || s.includes('login required') || s.includes('sign in')) return 'This video is private or needs a login. Server-side download cannot open it without an account.';
-  if (s.includes('412') || s.includes('precondition failed')) return 'That site blocked the server\u2019s request (HTTP 412). This video cannot be downloaded from this server.';
+  if (s.includes('not available in your country') || s.includes('blocked in your country')) return 'This video is not available in this region, so it cannot be downloaded here.';
+  if (s.includes('private video') || s.includes('login required') || s.includes('sign in')) return 'This video is private or needs a login. It cannot be opened without an account.';
+  if (s.includes('412') || s.includes('precondition failed')) return 'That site blocked the download request (HTTP 412). This video cannot be downloaded from here.';
   if (s.includes('age-restricted') || s.includes('age restricted') || s.includes('age gate') || s.includes('age verification')) return 'This video is age-restricted and needs a logged-in account.';
   if (s.includes('unsupported url') || s.includes('no video formats')) return 'This link is not a supported public video link, or the video has no downloadable formats.';
   if (s.includes('video unavailable') || s.includes('removed') || s.includes('deleted')) return 'This video is unavailable, removed, or deleted.';
@@ -290,9 +290,11 @@ async function getBilibiliInfo(id) {
 function bilibiliQn(quality) {
   // qn codes: 16=360p, 32=480p, 64=720p, 80=1080p (needs login; the
   // API downgrades anonymous requests to 720p, so ask for 80 = best).
-  const want = quality === 'best' ? 80 : (parseInt(quality, 10) || 720);
-  if (want >= 720) return 80;
-  if (want >= 480) return 32;
+  // `quality` is a height ('best', '720', '480', '360'), not a qn
+  // code — compare against heights, then map to the qn code.
+  const wantHeight = quality === 'best' ? 720 : (parseInt(quality, 10) || 720);
+  if (wantHeight >= 720) return 80;
+  if (wantHeight >= 480) return 32;
   return 16;
 }
 async function bilibiliFileUrl(info, quality) {
@@ -300,15 +302,18 @@ async function bilibiliFileUrl(info, quality) {
   const data = await bilibiliApi(`/x/player/playurl?${q}&cid=${info.cid}&qn=${bilibiliQn(quality)}&fnval=1`, info.buvid3);
   const durl = data.durl?.[0];
   if (!durl?.url) throw new Error('No downloadable file for this Bilibili video.');
-  return durl.url;
+  return { url: durl.url, size: durl.size || 0 };
 }
 function runBilibiliJob(job, jobDir) {
   getBilibiliInfo(bilibiliId(job.url)).then(async info => {
     try {
-      const fileUrl = await bilibiliFileUrl(info, job.quality);
+      const { url: fileUrl, size: expectedSize } = await bilibiliFileUrl(info, job.quality);
       const mp4File = path.join(jobDir, `${safeName(info.title)}.mp4`);
       const mp3File = path.join(jobDir, `${safeName(info.title)}.mp3`);
-      const p = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'info', '-headers', 'Referer: https://www.bilibili.com/', '-user_agent', 'Mozilla/5.0', '-i', fileUrl, '-c', 'copy', mp4File], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+      // -reconnect: Bilibili's CDN sometimes drops the connection
+      // mid-file (a test download stopped at 63/80 MB) and ffmpeg
+      // still exits 0, so a truncated file would be served as ready.
+      const p = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'info', '-headers', 'Referer: https://www.bilibili.com/', '-user_agent', 'Mozilla/5.0', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', fileUrl, '-c', 'copy', mp4File], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
       job.proc = p;
       let err = '';
       const dur = info.duration || 0;
@@ -326,6 +331,18 @@ function runBilibiliJob(job, jobDir) {
         job.proc = null;
         if (job.status === 'cancelled') return;
         if (code !== 0) { finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); return; }
+        // The API grants 720p most of the time but sometimes hands
+        // back a lower-quality file, and a dropped connection can
+        // still exit 0 — so check the size before calling it ready.
+        if (expectedSize > 0) {
+          let got = 0; try { got = fs.statSync(mp4File).size; } catch {}
+          if (got < expectedSize * 0.9) {
+            job.status = 'error';
+            job.error = 'The download stopped early (only part of the video arrived). Please try again.';
+            try { fs.rmSync(mp4File, { force: true }); } catch {}
+            return;
+          }
+        }
         if (job.quality === 'audio') {
           const c = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4File, '-vn', '-c:a', 'libmp3lame', '-q:a', '2', mp3File], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
           job.proc = c;
@@ -387,7 +404,7 @@ function finishJob(job, jobDir, errText) {
     if (!file) {
       const anyFile = fs.readdirSync(jobDir).some(f => f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
       job.status = 'error';
-      job.error = anyFile ? 'The video could not be assembled on the server (merging failed). Please try again.' : 'Download finished on the server but no file was created.';
+      job.error = anyFile ? 'The video could not be prepared (merging failed). Please try again.' : 'The download finished but no file was created.';
       return;
     }
     job.size = fs.statSync(file).size;
