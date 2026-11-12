@@ -184,7 +184,13 @@ async function getBeegInfo(id) {
   }
   formats.sort((a, b) => b.height - a.height);
   if (!formats.length) throw new Error('No downloadable formats found for this Beeg video.');
-  return { title, duration, formats };
+  // Thumbnail: Beeg's own player uses the last fc_thumbs frame at
+  // thumbs.externulls.com/videos/{fileId}/{offset}.webp?size=480x{height}.
+  const thumbs = facts.fc_facts?.[0]?.fc_thumbs || [];
+  const offset = thumbs.length ? thumbs[thumbs.length - 1] : 0;
+  const fw = facts.file?.fl_width || 1920, fh = facts.file?.fl_height || 1080;
+  const thumbnail = offset ? `https://thumbs.externulls.com/videos/${id}/${offset}.webp?size=480x${Math.round(480 * fh / fw)}` : '';
+  return { title, duration, formats, thumbnail };
 }
 function beegVariantFor(info, quality) {
   const want = quality === 'best' ? 1080 : (parseInt(quality, 10) || 720);
@@ -360,7 +366,7 @@ const server = http.createServer(async (req, res) => {
       if (bid) {
         try {
           const info = await getBeegInfo(bid);
-          return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: '', platform: 'Beeg', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
+          return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: info.thumbnail || '', platform: 'Beeg', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
         } catch (e) { return sendJson(res, 500, { error: 'This Beeg video could not be found. The link may be wrong, or the video was removed.' }); }
       }
       const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url]);

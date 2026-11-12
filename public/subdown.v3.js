@@ -5,7 +5,7 @@
   // cached stylesheet: centred result, spinner, professional buttons.
   var css = '#sf_result{max-width:960px;margin:0 auto;width:100%;box-sizing:border-box;text-align:center;padding:0 12px}' +
     '.sd-card{margin:18px auto;padding:22px 20px;border:1px solid #e3e8e3;border-radius:14px;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.06);text-align:center}' +
-    '.sd-card img{max-width:480px;width:100%;border-radius:10px;display:block;margin:0 auto 14px}' +
+    '.sd-card img{max-width:320px;max-height:240px;width:auto;height:auto;object-fit:contain;border-radius:10px;display:block;margin:0 auto 14px}' +
     '.sd-card h3{font-size:20px;line-height:1.4;margin:0 0 6px;color:#222}' +
     '.sd-meta{font-size:14px;color:#777;margin:0 0 14px}' +
     '.sd-q{display:inline-block;margin:5px;padding:11px 20px;cursor:pointer;border:none;border-radius:8px;background:#84bd07;color:#fff;font-size:15px;font-weight:700}' +
