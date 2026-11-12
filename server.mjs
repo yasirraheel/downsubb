@@ -76,8 +76,24 @@ const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 // The android player client is what got YouTube working from a clean
 // server IP; the web client is used when cookies are present, because
 // android does not support cookies.
-const PLAYER_CLIENT = COOKIES_FILE ? 'web' : 'android';
-const BASE_ARGS = ['--force-ipv4', '--js-runtimes', 'deno', '--extractor-args', `youtube:player_client=${PLAYER_CLIENT}`, ...(COOKIES_FILE ? ['--cookies', COOKIES_FILE] : []), ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : [])];
+// The cookies file is a whole-browser export: it holds YouTube login
+// cookies AND stale session cookies for TikTok, Instagram, X, etc.
+// Sending those stale TikTok cookies (msToken, ttwid, tt_csrf_token)
+// makes TikTok answer HTTP 403 (proven 2026-11-12 on
+// vt.tiktok.com/ZSpHogRWk: same link 403s with --cookies and works
+// without, 6/6 in a controlled A/B test). Cookies are therefore only
+// ever sent to YouTube, where they prove a logged-in account; every
+// other site gets no cookies at all.
+function siteArgs(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    if (h.includes('youtube') || h === 'youtu.be') {
+      return COOKIES_FILE ? ['--extractor-args', 'youtube:player_client=web', '--cookies', COOKIES_FILE] : ['--extractor-args', 'youtube:player_client=android'];
+    }
+  } catch {}
+  return [];
+}
+const BASE_ARGS = ['--force-ipv4', '--js-runtimes', 'deno', '--extractor-retries', '5', '--retry-sleep', 'extractor:15', ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : [])];
 // Extra PATH for yt-dlp to find deno/node/ffmpeg on shared hosting.
 const CHILD_PATH = [path.join(REAL_HOME, 'bin'), path.join(os.homedir(), 'bin'), '/opt/alt/alt-nodejs20/root/usr/bin', process.env.PATH].filter(Boolean).join(':');
 const CHILD_ENV = { ...process.env, PATH: CHILD_PATH };
@@ -100,9 +116,9 @@ function detectPlatform(url) {
 }
 function validUrl(s) { try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; } }
 
-function runYtDlp(args, timeoutMs = 120000) {
+function runYtDlp(args, url, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
-    const p = spawn(YTDLP, [...BASE_ARGS, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+    const p = spawn(YTDLP, [...BASE_ARGS, ...siteArgs(url), ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
     let out = '', err = '';
     const t = setTimeout(() => { p.kill('SIGKILL'); reject(new Error('Timed out while talking to the video site. Try again.')); }, timeoutMs);
     p.stdout.on('data', d => { out += d; if (out.length > 5_000_000) p.kill(); });
@@ -425,12 +441,26 @@ function parseProgress(job, text) {
 }
 function runYtDlpJob(job, jobDir) {
   const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
+  // A site sometimes briefly refuses this server's IP (TikTok answered
+  // HTTP 403 on 2026-11-12 18:25 PKT for vt.tiktok.com/ZSpHogRWk, then
+  // the identical download worked 3 minutes later; yt-dlp also warns
+  // that no impersonation target is available, so TikTok can 403 on
+  // TLS fingerprint). Failing the job at once makes the user tap
+  // "Download again" for a block that lifts on its own, so transient
+  // failures are retried in the background instead.
+  const isTransientError = s => {
+    const t = (s || '').toLowerCase();
+    return t.includes('403') || t.includes('forbidden') || t.includes('412') || t.includes('precondition failed') || t.includes('429') || t.includes('too many requests') || t.includes('timed out') || t.includes('timeout') || t.includes('connection reset') || t.includes('connection refused') || t.includes('temporary failure') || t.includes('http error 500') || t.includes('http error 502') || t.includes('http error 503') || t.includes('http error 504') || t.includes('bad gateway') || t.includes('service unavailable');
+  };
+  const JOB_MAX_ATTEMPTS = 3; // first try + 2 retries
+  const JOB_RETRY_DELAYS = [30000, 60000]; // wait 30s, then 60s
+  job.attempts = (job.attempts || 0) + 1;
   // --referer: the video page itself. Some CDNs refuse fragment
   // requests without a Referer (RedTube's rdtcdn answers 410 Gone,
   // so yt-dlp retries every fragment 10x and the job sits at 0%
   // forever — proven 2026-11-12 on redtube.com/189933211). Sending
   // the page URL as Referer is standard and harmless for other sites.
-  const p = spawn(YTDLP, [...BASE_ARGS, '--referer', job.url, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+  const p = spawn(YTDLP, [...BASE_ARGS, ...siteArgs(job.url), '--referer', job.url, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
   job.proc = p;
   let err = '';
   p.stdout.on('data', d => parseProgress(job, d.toString()));
@@ -439,7 +469,16 @@ function runYtDlpJob(job, jobDir) {
   p.on('close', code => {
     job.proc = null;
     if (job.status === 'error' || job.status === 'cancelled') return;
-    if (code !== 0) { job.status = 'error'; job.error = friendlyError(err || `yt-dlp exited with code ${code}`); return; }
+    if (code !== 0) {
+      const msg = err || `yt-dlp exited with code ${code}`;
+      if (isTransientError(msg) && (job.attempts || 1) < JOB_MAX_ATTEMPTS) {
+        const delay = JOB_RETRY_DELAYS[(job.attempts || 1) - 1] || 60000;
+        console.log(`[job ${job.id}] transient failure (attempt ${job.attempts}), retrying in ${delay / 1000}s`);
+        setTimeout(() => { if (job.status !== 'cancelled') runYtDlpJob(job, jobDir); }, delay);
+        return;
+      }
+      job.status = 'error'; job.error = friendlyError(msg); return;
+    }
     finishJob(job, jobDir, null);
   });
 }
@@ -601,7 +640,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: info.thumbnail || '', platform: 'Bilibili', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
         } catch (e) { return sendJson(res, 500, { error: 'This Bilibili video could not be found. The link may be wrong, or the video was removed.' }); }
       }
-      const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url]);
+      const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url], url);
       const j = JSON.parse(out);
       if (j.duration && j.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(j.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
       // Labels use the shorter side mapped to the nearest standard

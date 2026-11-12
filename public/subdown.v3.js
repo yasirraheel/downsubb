@@ -144,6 +144,32 @@
   var input = document.getElementById('sf_url');
   var result = document.getElementById('sf_result');
   if (!form || !input || !result) return;
+  // Paste button: shown instead of the submit arrow while the input is
+  // empty; once a URL is in the box the arrow comes back.
+  var submitBtn = document.getElementById('sf_submit');
+  var pasteBtn = document.getElementById('sf_paste');
+  function syncPasteBtn() {
+    var hasUrl = !!(input.value && input.value.trim());
+    if (pasteBtn) pasteBtn.style.display = hasUrl ? 'none' : '';
+    if (submitBtn) submitBtn.style.display = hasUrl ? '' : 'none';
+  }
+  input.addEventListener('input', syncPasteBtn);
+  syncPasteBtn();
+  if (pasteBtn) {
+    pasteBtn.addEventListener('click', async function () {
+      var text = '';
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          text = await navigator.clipboard.readText();
+        }
+      } catch (e) { text = ''; }
+      if (text) {
+        input.value = text.trim();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      input.focus();
+    });
+  }
   renderQueue();
   function esc(s){ return String(s||'').replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   // Covers load through our server (/api/thumb): some thumbnail CDNs
