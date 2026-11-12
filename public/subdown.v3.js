@@ -57,7 +57,7 @@
         (e.thumbnail ? '<img src="' + thumbSrc(e.thumbnail, e.url) + '" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'" style="width:64px;height:36px;object-fit:cover;border-radius:6px;flex:0 0 auto">' : '') +
         '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(e.title || 'Video') + '</div>' +
         '<div class="sd-qstatus" style="font-size:13px;color:#777">Checking...</div></div>' +
-        '<span class="sd-qact"></span></div>';
+        '<span class="sd-qact"></span><button type="button" class="sd-qdel" data-del="' + esc(e.jobId) + '" title="Remove from history" aria-label="Remove from history" style="border:0;background:transparent;color:#999;font-size:18px;line-height:1;cursor:pointer;padding:6px;flex:0 0 auto">✕</button></div>';
     }
     box.innerHTML = '<div style="font-size:16px;font-weight:700;margin-bottom:4px">Your downloads</div>' + rows;
     q.forEach(function (e) { pollQueueEntry(e); });
@@ -116,9 +116,17 @@
     saveQueue(loadQueue().filter(function (x) { return x.jobId !== jobId; }));
     renderQueue();
   }
+  // Remove from local history only: the server keeps the download and
+  // its file, this just takes the row out of this browser's list.
+  function removeFromQueue(jobId){
+    saveQueue(loadQueue().filter(function (x) { return x.jobId !== jobId; }));
+    renderQueue();
+  }
   document.addEventListener('click', function (ev) {
     var faq = ev.target.closest ? ev.target.closest('.faq_item_title') : null;
     if (faq) { var item = faq.closest('.faq_item'); if (item) item.classList.toggle('active'); return; }
+    var d = ev.target.closest ? ev.target.closest('[data-del]') : null;
+    if (d) { removeFromQueue(d.getAttribute('data-del')); return; }
     var b = ev.target.closest ? ev.target.closest('[data-cancel]') : null;
     if (!b) return;
     var id = b.getAttribute('data-cancel');
