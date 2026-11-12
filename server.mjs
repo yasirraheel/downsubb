@@ -172,6 +172,44 @@ function fetchText(url, referer) {
     req.on('error', reject); req.setTimeout(30000, () => req.destroy(new Error('Timed out')));
   });
 }
+
+// ---- Thumbnails via our own server (/api/thumb) ----
+// Video cover images live on the platforms' CDNs (xhcdn, ytimg, ...).
+// Some of those CDNs are blocked in the user's country, so the cover
+// never loads in their browser even though the video itself works
+// (the video is downloaded by this server). The frontend therefore
+// loads every cover through /api/thumb?url=...&page=... : this server
+// fetches it (it can reach the CDNs) and streams it back. Only known
+// thumbnail hosts are allowed, only images, max 5 MB, cached on disk
+// for 7 days so repeat views cost nothing.
+const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com'];
+const thumbsDir = path.join(root, '.thumbs');
+fs.mkdirSync(thumbsDir, { recursive: true });
+function thumbHostOk(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return THUMB_HOSTS.some(s => h === s || h.endsWith('.' + s));
+}
+function fetchImage(url, referer, redirectsLeft) {
+  return new Promise((resolve, reject) => {
+    let u; try { u = new URL(url); } catch { return reject(new Error('Bad thumbnail URL')); }
+    if (!thumbHostOk(u.hostname)) return reject(new Error('Thumbnail host not allowed'));
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36', ...(referer ? { Referer: referer } : {}) } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if (!redirectsLeft) return reject(new Error('Too many redirects'));
+        return resolve(fetchImage(new URL(res.headers.location, u).toString(), referer, redirectsLeft - 1));
+      }
+      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      const type = String(res.headers['content-type'] || '');
+      if (!type.startsWith('image/')) return reject(new Error('Not an image'));
+      const chunks = []; let size = 0;
+      res.on('data', d => { size += d.length; if (size > 5_000_000) { req.destroy(new Error('Thumbnail too large')); } else chunks.push(d); });
+      res.on('end', () => resolve({ type: type.split(';')[0].trim(), buf: Buffer.concat(chunks) }));
+      res.on('error', reject);
+    });
+    req.on('error', reject); req.setTimeout(10000, () => req.destroy(new Error('Timed out')));
+  });
+}
 async function getBeegInfo(id) {
   const facts = JSON.parse(await fetchText(`https://store.externulls.com/facts/file/${id}`));
   const title = (facts.file?.data || []).find(d => d.cd_column === 'sf_name')?.cd_value || 'Beeg video';
@@ -496,6 +534,38 @@ const server = http.createServer(async (req, res) => {
           const s = fs.createReadStream(job.file); s.pipe(res);
         } else if (job.status === 'error') { clearInterval(wait); if (!res.headersSent) sendJson(res, 500, { error: job.error || 'Download failed.' }); }
       }, 1000);
+      return;
+    }
+    // Video cover through our server: some thumbnail CDNs are blocked
+    // in the user's country, so the browser loads the cover from here.
+    if (req.method === 'GET' && u.pathname === '/api/thumb') {
+      const thumbUrl = u.searchParams.get('url') || '';
+      const page = u.searchParams.get('page') || '';
+      let host = '';
+      try { host = new URL(thumbUrl).hostname; } catch {}
+      if (!thumbUrl || !thumbHostOk(host)) { sendJson(res, 400, { error: 'Bad thumbnail URL' }); return; }
+      const key = crypto.createHash('sha256').update(thumbUrl).digest('hex');
+      const file = path.join(thumbsDir, key);
+      const typeFile = file + '.type';
+      try {
+        const st = fs.statSync(file);
+        if (Date.now() - st.mtimeMs < 7 * 24 * 60 * 60 * 1000) {
+          const type = fs.readFileSync(typeFile, 'utf8');
+          res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=86400' });
+          fs.createReadStream(file).pipe(res); return;
+        }
+      } catch {}
+      try {
+        const img = await fetchImage(thumbUrl, page || undefined, 3);
+        try { fs.writeFileSync(file + '.tmp', img.buf); fs.renameSync(file + '.tmp', file); fs.writeFileSync(typeFile, img.type); } catch {}
+        // Bound the cache: drop the oldest files past 1000.
+        try {
+          const files = fs.readdirSync(thumbsDir).filter(f => !f.endsWith('.type') && !f.endsWith('.tmp')).map(f => ({ f, t: fs.statSync(path.join(thumbsDir, f)).mtimeMs })).sort((a, b) => a.t - b.t);
+          for (const old of files.slice(0, Math.max(0, files.length - 1000))) { try { fs.rmSync(path.join(thumbsDir, old.f), { force: true }); fs.rmSync(path.join(thumbsDir, old.f + '.type'), { force: true }); } catch {} }
+        } catch {}
+        res.writeHead(200, { 'Content-Type': img.type, 'Cache-Control': 'public, max-age=86400' });
+        res.end(img.buf);
+      } catch (e) { if (!res.headersSent) sendJson(res, 404, { error: 'Thumbnail unavailable' }); }
       return;
     }
     res.writeHead(404).end('Not found');

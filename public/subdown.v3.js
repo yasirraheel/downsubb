@@ -54,6 +54,7 @@
     for (var i = 0; i < q.length; i++) {
       var e = q[i];
       rows += '<div data-job="' + esc(e.jobId) + '" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin:8px 0;border:1px solid #e3e8e3;border-radius:10px;background:#fff">' +
+        (e.thumbnail ? '<img src="' + thumbSrc(e.thumbnail, e.url) + '" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'" style="width:64px;height:36px;object-fit:cover;border-radius:6px;flex:0 0 auto">' : '') +
         '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(e.title || 'Video') + '</div>' +
         '<div class="sd-qstatus" style="font-size:13px;color:#777">Checking...</div></div>' +
         '<span class="sd-qact"></span></div>';
@@ -132,6 +133,10 @@
   if (!form || !input || !result) return;
   renderQueue();
   function esc(s){ return String(s||'').replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  // Covers load through our server (/api/thumb): some thumbnail CDNs
+  // are blocked in the user's country, so the browser would show no
+  // preview even though the video itself downloads fine.
+  function thumbSrc(thumb, page){ if (!thumb) return ''; return '/api/thumb?url=' + encodeURIComponent(thumb) + (page ? '&page=' + encodeURIComponent(page) : ''); }
   function show(html){ result.innerHTML = html; }
   function errorBox(msg){
     show('<div class="sd-error">' +
@@ -158,7 +163,7 @@
     }).join('');
     show(
       '<div class="sd-card">' +
-      (info.thumbnail ? '<img src="' + esc(info.thumbnail) + '" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">' : '') +
+      (info.thumbnail ? '<img src="' + thumbSrc(info.thumbnail, url) + '" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">' : '') +
       '<h3>' + esc(info.title || 'Video') + '</h3>' +
       '<p class="sd-meta">' + esc(info.platform || '') + (info.duration ? ' &bull; ' + Math.round(info.duration / 60) + ' min' : '') + '</p>' +
       '<p style="font-weight:700;margin:0 0 6px">Choose quality:</p><div>' + (btns || '<button type="button" class="sd-q" data-q="best">Download</button>') + '</div>' +
@@ -175,7 +180,7 @@
           var jr = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url, quality: b.getAttribute('data-q') }) });
           job = await jr.json();
           if (!jr.ok) throw new Error(job.error || 'Download failed to start.');
-          addToQueue({ jobId: job.jobId, url: url, title: info.title || 'Video', quality: b.getAttribute('data-q'), createdAt: Date.now() });
+          addToQueue({ jobId: job.jobId, url: url, title: info.title || 'Video', thumbnail: info.thumbnail || '', quality: b.getAttribute('data-q'), createdAt: Date.now() });
         } catch (err) { errorBox(err.message); return; }
         timers[job.jobId] = setInterval(async function () {
           try {
