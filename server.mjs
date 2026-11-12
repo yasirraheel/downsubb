@@ -120,6 +120,12 @@ function readBody(req) { return new Promise((resolve, reject) => { let b = ''; r
 function safeName(s) { return (s || 'video').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'video'; }
 
 function downloadArgs(url, quality, outTpl) {
+  // Direct media (.mp4/.webm/...) has no height metadata, so height
+  // filters match nothing ("Requested format is not available") — use best.
+  if (isDirectMedia(url)) {
+    if (quality === 'audio') return ['--no-playlist', '--continue', '-f', 'ba/b', '-o', outTpl, url];
+    return ['--no-playlist', '--continue', '-f', 'best/b', '-o', outTpl, url];
+  }
   // --continue: a retry (or a server restart) resumes the .part file
   // instead of downloading from zero again.
   if (quality === 'audio') {
