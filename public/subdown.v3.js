@@ -207,3 +207,8 @@
   var menuBtn = document.querySelector('.menu-btn');
   if (menuBtn) menuBtn.addEventListener('click', function () { document.body.classList.toggle('sd-nav-open'); });
   document.querySelectorAll('#nav_top a').forEach(function (a) { a.addEventListener('click', function () { document.body.classList.remove('sd-nav-open'); }); });
+
+  // Clicking any platform icon focuses the link box so you can paste its link.
+  document.querySelectorAll('.sd-float, .sd-hero-icons span, .footer_v2 span').forEach(function (el) {
+    el.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); var inp = document.getElementById('sf_url'); if (inp) inp.focus(); });
+  });
