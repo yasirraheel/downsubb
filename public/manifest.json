@@ -1,16 +1,24 @@
 {
-  "short_name": "SaveFrom.net",
-  "name": "SaveFrom.net",
+  "background_color": "#ffffff",
+  "description": "VidSnap \u2014 Free Online Video Downloader",
+  "display": "standalone",
   "icons": [
     {
+      "purpose": "any",
+      "sizes": "192x192",
       "src": "/img/extension/icon_192.png",
-      "type": "image/png",
-      "sizes": "192x192"
+      "type": "image/png"
+    },
+    {
+      "purpose": "any maskable",
+      "sizes": "512x512",
+      "src": "/img/extension/icon_512.png",
+      "type": "image/png"
     }
   ],
-  "start_url": "/",
-  "background_color": "#f9f9f9",
-  "display": "standalone",
+  "name": "VidSnap",
   "scope": "/",
-  "theme_color": "#f9f9f9"
+  "short_name": "VidSnap",
+  "start_url": "/",
+  "theme_color": "#84bd07"
 }

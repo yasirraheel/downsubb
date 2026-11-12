@@ -69,7 +69,7 @@ console.log(`SubDown starting: yt-dlp=${YTDLP} ffmpeg=${FFMPEG || 'none'} cookie
 const MAX_BYTES = Number(process.env.MAX_BYTES || 2 * 1024 * 1024 * 1024); // 2 GB
 const MAX_DURATION = Number(process.env.MAX_DURATION || 3 * 60 * 60); // 3 hours
 
-const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json' };
+const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json', '.xml': 'application/xml', '.txt': 'text/plain' };
 // Own-backend args, applied to every yt-dlp call. No API, no login
 // is required for the server itself: yt-dlp + Deno (JS challenge
 // solver, ~/bin/deno on Hostinger) + ffmpeg are all self-contained.
@@ -115,7 +115,8 @@ function friendlyError(raw) {
   const s = raw.toLowerCase();
   if (s.includes('not available in your country') || s.includes('blocked in your country')) return 'This video is not available in the server country either. A server in an allowed country is needed for this link.';
   if (s.includes('private video') || s.includes('login required') || s.includes('sign in')) return 'This video is private or needs a login. Server-side download cannot open it without an account.';
-  if (s.includes('age')) return 'This video is age-restricted and needs a logged-in account.';
+  if (s.includes('412') || s.includes('precondition failed')) return 'That site blocked the server\u2019s request (HTTP 412). This video cannot be downloaded from this server.';
+  if (s.includes('age-restricted') || s.includes('age restricted') || s.includes('age gate') || s.includes('age verification')) return 'This video is age-restricted and needs a logged-in account.';
   if (s.includes('unsupported url') || s.includes('no video formats')) return 'This link is not a supported public video link, or the video has no downloadable formats.';
   if (s.includes('video unavailable') || s.includes('removed') || s.includes('deleted')) return 'This video is unavailable, removed, or deleted.';
   if (s.includes('unable to download json metadata') || s.includes('http error 400') || s.includes('bad request')) return 'This video could not be found on that site. The link may be wrong, or the video was removed.';
@@ -411,6 +412,11 @@ setInterval(() => {
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host}`);
+    // www -> non-www (SEO: one canonical host; only vidsnap.online,
+    // the downsub host keeps serving as-is).
+    if (req.headers.host === 'www.vidsnap.online') {
+      res.writeHead(301, { Location: 'https://vidsnap.online' + u.pathname + u.search }); res.end(); return;
+    }
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       res.writeHead(200, { 'Content-Type': mime['.html'], 'Cache-Control': 'no-cache, must-revalidate' }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
     }
@@ -420,17 +426,24 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && !u.pathname.startsWith('/api/')) {
       // Static assets from public/ (exact template design: /build, /img, /font, /js, /subdown.js)
-      // Unknown pages fall back to the homepage instead of a blank
-      // "Not found" page (the template has many guide links we do not host).
       const rel = u.pathname === '/' || u.pathname === '/index.html' ? 'index.html' : u.pathname.replace(/^\/+/, '');
-      const f = path.resolve(publicDir, rel);
-      if (!f.startsWith(publicDir) || !fs.existsSync(f) || !fs.statSync(f).isFile()) {
-        res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
+      let f = path.resolve(publicDir, rel);
+      if (!f.startsWith(publicDir) || !fs.existsSync(f)) {
+        // Unknown page: a real branded 404 (SEO: no more soft-404 homepage).
+        res.writeHead(404, { 'Content-Type': mime['.html'], 'Cache-Control': 'no-cache, must-revalidate' }); fs.createReadStream(path.join(publicDir, '404.html')).pipe(res); return;
       }
-      // JS/CSS must never be cached long: a cached old subdown.js kept
-      // showing the old left-aligned layout after fixes were deployed.
+      if (fs.statSync(f).isDirectory()) {
+        // /youtube-video-downloader -> /youtube-video-downloader/ (canonical trailing slash)
+        if (!u.pathname.endsWith('/')) { res.writeHead(301, { Location: u.pathname + '/' + u.search }); res.end(); return; }
+        f = path.join(f, 'index.html');
+        if (!fs.existsSync(f)) { res.writeHead(404, { 'Content-Type': mime['.html'], 'Cache-Control': 'no-cache, must-revalidate' }); fs.createReadStream(path.join(publicDir, '404.html')).pipe(res); return; }
+      }
       const headers = { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' };
-      if (/\.(js|css|html)$/.test(f)) headers['Cache-Control'] = 'no-cache, must-revalidate';
+      // Versioned assets (?v=) are immutable: the ?v= bump rule guarantees
+      // a new URL on every change, so long caching is safe and fast.
+      // Unversioned HTML/JS/CSS stay no-cache.
+      if (/\.(js|css)$/.test(f) && u.searchParams.has('v')) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+      else if (/\.(js|css|html)$/.test(f)) headers['Cache-Control'] = 'no-cache, must-revalidate';
       res.writeHead(200, headers); fs.createReadStream(f).pipe(res); return;
     }
     if (req.method === 'POST' && u.pathname === '/') {
