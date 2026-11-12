@@ -14,6 +14,7 @@
 // It does NOT bypass a block in the server's country too, or a private,
 // login-only, or age-gated video.
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -40,7 +41,7 @@ for (const f of [localYtDlp, path.join(root, 'yt-dlp.bin')]) { try { if (fs.exis
 // installed on Hostinger at ~/bin/ffmpeg (no login, no API needed).
 // It is used for merging AND for direct .mp4/.m3u8 links, which need
 // no yt-dlp, no cookies, and no login at all.
-const FFMPEG_CANDIDATES = [process.env.FFMPEG, path.join(os.homedir(), 'bin', 'ffmpeg'), '/usr/bin/ffmpeg', 'ffmpeg'];
+const FFMPEG_CANDIDATES = [process.env.FFMPEG, path.join(root, 'ffmpeg'), path.join(os.homedir(), 'bin', 'ffmpeg'), '/usr/bin/ffmpeg', 'ffmpeg'];
 const FFMPEG = FFMPEG_CANDIDATES.find(p => { try { return p && spawnSync(p, ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; } }) || null;
 const HAS_FFMPEG = !!FFMPEG;
 // YouTube cookies (optional, for bot-check): set COOKIES_FILE in the
@@ -142,8 +143,54 @@ function downloadArgs(url, quality, outTpl) {
   return ['--no-playlist', '--continue', '-f', f, '-o', outTpl, url];
 }
 
-// Direct media link (.mp4/.webm/.m3u8/.mp3 …): ffmpeg downloads it
-// directly — no yt-dlp, no cookies, no login, no API at all.
+// ---- Beeg (native, no yt-dlp: its Beeg extractor is broken) ----
+// yt-dlp fails Beeg two ways: the facts API rejects ids with a leading
+// zero (Go parses them as octal), and the CDN 403s fragments unless
+// they carry Referer: https://beeg.com/ (yt-dlp does not send it on
+// fragments, ffmpeg does). So we resolve Beeg ourselves: facts for the
+// title, play_url for a signed master playlist, ffmpeg + Referer for
+// the download. The signed key is IP-bound, so everything must be
+// fetched from this same server.
+function beegId(url) { const m = String(url).match(/beeg\.com\/(?:video\/)?-?(\d+)/i); return m ? m[1].replace(/^0+/, '') || '0' : null; }
+function fetchText(url, referer) {
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith('https:') ? https : http;
+    const req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36', ...(referer ? { Referer: referer } : {}) } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return resolve(fetchText(new URL(res.headers.location, url).toString(), referer));
+      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      let b = ''; res.setEncoding('utf8'); res.on('data', d => { b += d; if (b.length > 5_000_000) req.destroy(); }); res.on('end', () => resolve(b));
+    });
+    req.on('error', reject); req.setTimeout(30000, () => req.destroy(new Error('Timed out')));
+  });
+}
+async function getBeegInfo(id) {
+  const facts = JSON.parse(await fetchText(`https://store.externulls.com/facts/file/${id}`));
+  const title = (facts.file?.data || []).find(d => d.cd_column === 'sf_name')?.cd_value || 'Beeg video';
+  const duration = facts.file?.fl_duration || 0;
+  const playRaw = (await fetchText(`https://store.externulls.com/video/play_url/${id}`)).trim();
+  const master = await fetchText('https://video.beeg.com/' + playRaw, 'https://beeg.com/');
+  // Master playlist: pick h264 (avc1) variants only, one per height.
+  const formats = []; const seen = new Set();
+  const lines = master.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/#EXT-X-STREAM-INF:.*RESOLUTION=\d+x(\d+),CODECS="avc1[^"]*"/);
+    if (!m) continue;
+    const height = parseInt(m[1], 10);
+    if (seen.has(height) || !lines[i + 1]) continue; seen.add(height);
+    let vurl = lines[i + 1].trim();
+    if (vurl.startsWith('//')) vurl = 'https:' + vurl;
+    else if (vurl.startsWith('/')) vurl = 'https://video.beeg.com' + vurl;
+    formats.push({ label: `${height}p`, height, variantUrl: vurl });
+  }
+  formats.sort((a, b) => b.height - a.height);
+  if (!formats.length) throw new Error('No downloadable formats found for this Beeg video.');
+  return { title, duration, formats };
+}
+function beegVariantFor(info, quality) {
+  const want = quality === 'best' ? 1080 : (parseInt(quality, 10) || 720);
+  const ok = info.formats.filter(f => f.height <= want);
+  return (ok[0] || info.formats[info.formats.length - 1]);
+}
 function isDirectMedia(url) {
   try { const p = new URL(url).pathname.toLowerCase(); return /\.(mp4|webm|mov|mkv|m3u8|mp3|m4a|wav|avi)$/.test(p); } catch { return false; }
 }
@@ -193,9 +240,35 @@ function startJob(url, quality) {
   // Keep the link on disk so a server restart can resume this job.
   try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url, quality, createdAt: Date.now() })); } catch {}
   const existing = jobs.get(id);
-  if (existing && existing.status === 'downloading') return existing;
+  if (existing && (existing.status === 'downloading' || existing.status === 'ready')) return existing;
   const job = { id, url, quality, status: 'downloading', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
   jobs.set(id, job);
+  // Beeg: native ffmpeg download (yt-dlp cannot do it: broken extractor
+  // + CDN 403s fragments without a Referer, which ffmpeg sends).
+  const bid = beegId(url);
+  if (bid && FFMPEG) {
+    getBeegInfo(bid).then(info => {
+      const variant = beegVariantFor(info, quality);
+      const outFile = path.join(jobDir, `${safeName(info.title)}.mp4`);
+      const args = ['-y', '-hide_banner', '-loglevel', 'info', '-headers', 'Referer: https://beeg.com/', '-user_agent', 'Mozilla/5.0', '-i', variant.variantUrl, '-c', 'copy', outFile];
+      const p = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+      job.proc = p;
+      let err = '';
+      const dur = info.duration || 0;
+      p.stderr.on('data', d => {
+        err += d;
+        const m = err.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g);
+        if (m && dur) {
+          const last = m[m.length - 1].match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+          const secs = (+last[1]) * 3600 + (+last[2]) * 60 + parseFloat(last[3]);
+          job.progress = Math.min(99, Math.round(secs / dur * 100));
+        } else if (m) job.progress = 50;
+      });
+      p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+      p.on('close', code => { job.proc = null; if (job.status === 'cancelled') return; if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
+    }).catch(e => { job.status = 'error'; job.error = 'This Beeg video could not be found. The link may be wrong, or the video was removed.'; });
+    return job;
+  }
   // Direct media: ffmpeg trick, no login/API.
   if (isDirectMedia(url) && FFMPEG) {
     const ext = new URL(url).pathname.split('.').pop().toLowerCase().split('?')[0] || 'mp4';
@@ -233,10 +306,15 @@ function cleanupJob(id) {
   jobs.delete(id);
   if (job.file) { try { fs.rmSync(path.dirname(job.file), { recursive: true, force: true }); } catch {} }
 }
-// Clean up jobs older than 1 hour, every hour
+// Clean up old jobs every hour. Ready files stay 12 hours so the
+// browser queue ("Your downloads") still works on a later visit;
+// downloading/error jobs expire after 1 hour.
 setInterval(() => {
   const now = Date.now();
-  for (const [id, job] of jobs) if (now - job.createdAt > 60 * 60 * 1000) cleanupJob(id);
+  for (const [id, job] of jobs) {
+    const ttl = job.status === 'ready' ? 12 * 60 * 60 * 1000 : 60 * 60 * 1000;
+    if (now - job.createdAt > ttl) cleanupJob(id);
+  }
 }, 60 * 60 * 1000);
 
 const server = http.createServer(async (req, res) => {
@@ -273,6 +351,14 @@ const server = http.createServer(async (req, res) => {
         const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'video');
         return sendJson(res, 200, { title: name, uploader: '', duration: 0, thumbnail: '', platform: 'Direct file', formats: [{ label: 'Original', height: 720 }], hasAudio: true, ffmpeg: HAS_FFMPEG });
       }
+      // Beeg: native resolution (yt-dlp's Beeg extractor is broken).
+      const bid = beegId(url);
+      if (bid) {
+        try {
+          const info = await getBeegInfo(bid);
+          return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: '', platform: 'Beeg', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
+        } catch (e) { return sendJson(res, 500, { error: 'This Beeg video could not be found. The link may be wrong, or the video was removed.' }); }
+      }
       const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url]);
       const j = JSON.parse(out);
       if (j.duration && j.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(j.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
@@ -308,13 +394,12 @@ const server = http.createServer(async (req, res) => {
           const end = m && m[2] ? parseInt(m[2], 10) : size - 1;
           res.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Disposition': `attachment; filename="${job.name}"` });
           fs.createReadStream(job.file, { start, end }).pipe(res);
-          res.on('finish', () => { if (end === size - 1) setTimeout(() => cleanupJob(job.id), 5000); });
-          return;
+                    return;
         }
         res.writeHead(200, { 'Content-Type': job.quality === 'audio' && !HAS_FFMPEG ? 'application/octet-stream' : 'video/mp4', 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': `attachment; filename="${job.name}"` });
         const stream = fs.createReadStream(job.file);
         stream.pipe(res);
-        stream.on('close', () => setTimeout(() => cleanupJob(job.id), 5000));
+        stream.on('close', () => {});
         return;
       }
       sendJson(res, 200, { jobId: job.id, status: job.status, progress: job.progress, error: job.error, size: job.size, name: job.name });
@@ -343,7 +428,7 @@ const server = http.createServer(async (req, res) => {
         if (job.status === 'ready') {
           clearInterval(wait);
           res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': job.size, 'Content-Disposition': `attachment; filename="${job.name}"` });
-          const s = fs.createReadStream(job.file); s.pipe(res); s.on('close', () => setTimeout(() => cleanupJob(job.id), 5000));
+          const s = fs.createReadStream(job.file); s.pipe(res);
         } else if (job.status === 'error') { clearInterval(wait); if (!res.headersSent) sendJson(res, 500, { error: job.error || 'Download failed.' }); }
       }, 1000);
       return;

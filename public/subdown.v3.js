@@ -16,6 +16,7 @@
     '.sd-spin{width:26px;height:26px;min-width:26px;border:3px solid #d9e8d9;border-top-color:#84bd07;border-radius:50%;animation:sd-rot 1s linear infinite}' +
     '@keyframes sd-rot{to{transform:rotate(360deg)}}' +
     '.sd-cancel{display:inline-block;margin:5px;padding:10px 18px;cursor:pointer;border:2px solid #dc3545;border-radius:8px;background:#fff;color:#b02a37;font-size:14px;font-weight:700}' +
+    '.faq_item_title{cursor:pointer}' +
     '.sd-dl{display:inline-block;margin-top:10px;padding:13px 26px;background:#84bd07;color:#fff!important;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
@@ -107,6 +108,8 @@
     renderQueue();
   }
   document.addEventListener('click', function (ev) {
+    var faq = ev.target.closest ? ev.target.closest('.faq_item_title') : null;
+    if (faq) { var item = faq.closest('.faq_item'); if (item) item.classList.toggle('active'); return; }
     var b = ev.target.closest ? ev.target.closest('[data-cancel]') : null;
     if (!b) return;
     var id = b.getAttribute('data-cancel');
