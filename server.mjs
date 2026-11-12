@@ -120,18 +120,20 @@ function readBody(req) { return new Promise((resolve, reject) => { let b = ''; r
 function safeName(s) { return (s || 'video').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'video'; }
 
 function downloadArgs(url, quality, outTpl) {
+  // --continue: a retry (or a server restart) resumes the .part file
+  // instead of downloading from zero again.
   if (quality === 'audio') {
     return HAS_FFMPEG
-      ? ['--no-playlist', '-f', 'ba', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '-o', outTpl, url]
-      : ['--no-playlist', '-f', 'ba/b', '-o', outTpl, url];
+      ? ['--no-playlist', '--continue', '-f', 'ba', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '-o', outTpl, url]
+      : ['--no-playlist', '--continue', '-f', 'ba/b', '-o', outTpl, url];
   }
   if (HAS_FFMPEG) {
     const f = quality === 'best' ? 'bv*[height<=1080]+ba/b[height<=1080]' : `bv*[height<=${parseInt(quality, 10) || 720}]+ba/b[height<=${parseInt(quality, 10) || 720}]`;
-    return ['--no-playlist', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
+    return ['--no-playlist', '--continue', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
   }
   // No ffmpeg: single pre-merged file only, up to 720p.
   const f = quality === 'best' ? 'best[height<=720]/18/b[height<=720]' : `best[height<=${parseInt(quality, 10) || 720}]/b[height<=${parseInt(quality, 10) || 720}]`;
-  return ['--no-playlist', '-f', f, '-o', outTpl, url];
+  return ['--no-playlist', '--continue', '-f', f, '-o', outTpl, url];
 }
 
 // Direct media link (.mp4/.webm/.m3u8/.mp3 …): ffmpeg downloads it
@@ -143,7 +145,8 @@ function finishJob(job, jobDir, errText) {
   if (job.status === 'error') return;
   if (errText) { job.status = 'error'; job.error = friendlyError(errText); return; }
   try {
-    const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile());
+    // Finished media only: ignore resume state (.part/.ytdl) and meta.json.
+    const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
     if (!files.length) { job.status = 'error'; job.error = 'Download finished on the server but no file was created.'; return; }
     const file = path.join(jobDir, files[0]);
     job.size = fs.statSync(file).size;
@@ -156,10 +159,33 @@ function finishJob(job, jobDir, errText) {
 
 // ---- background jobs ----
 const jobs = new Map(); // id -> {id, url, quality, status, progress, error, file, size, name, createdAt}
+// One job id per link+quality, so a retry resumes the same .part files.
+function jobIdFor(url, quality) { return crypto.createHash('sha256').update(url + '|' + quality).digest('hex').slice(0, 16); }
+function parseProgress(job, text) {
+  const m = text.match(/\[download\]\s+(\d+(?:\.\d+)?)%/g);
+  if (m) { const last = m[m.length - 1].match(/(\d+(?:\.\d+)?)%/); if (last) job.progress = Math.round(parseFloat(last[1])); }
+}
+function runYtDlpJob(job, jobDir) {
+  const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
+  const p = spawn(YTDLP, [...BASE_ARGS, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+  let err = '';
+  p.stdout.on('data', d => parseProgress(job, d.toString()));
+  p.stderr.on('data', d => { err += d; parseProgress(job, err); });
+  p.on('error', e => { job.status = 'error'; job.error = `yt-dlp not found at ${YTDLP}. (${e.message})`; });
+  p.on('close', code => {
+    if (job.status === 'error') return;
+    if (code !== 0) { job.status = 'error'; job.error = friendlyError(err || `yt-dlp exited with code ${code}`); return; }
+    finishJob(job, jobDir, null);
+  });
+}
 function startJob(url, quality) {
-  const id = crypto.randomBytes(8).toString('hex');
+  const id = jobIdFor(url, quality);
   const jobDir = path.join(jobsDir, id);
   fs.mkdirSync(jobDir, { recursive: true });
+  // Keep the link on disk so a server restart can resume this job.
+  try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url, quality, createdAt: Date.now() })); } catch {}
+  const existing = jobs.get(id);
+  if (existing && existing.status === 'downloading') return existing;
   const job = { id, url, quality, status: 'downloading', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
   jobs.set(id, job);
   // Direct media: ffmpeg trick, no login/API.
@@ -174,22 +200,25 @@ function startJob(url, quality) {
     p.on('close', code => { if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
     return job;
   }
-  const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
-  const p = spawn(YTDLP, [...BASE_ARGS, ...downloadArgs(url, quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
-  let err = '';
-  p.stderr.on('data', d => {
-    err += d;
-    const m = err.match(/\[download\]\s+(\d+(?:\.\d+)?)%/g);
-    if (m) { const last = m[m.length - 1].match(/(\d+(?:\.\d+)?)%/); if (last) job.progress = Math.round(parseFloat(last[1])); }
-  });
-  p.on('error', e => { job.status = 'error'; job.error = `yt-dlp not found at ${YTDLP}. (${e.message})`; });
-  p.on('close', code => {
-    if (job.status === 'error') return;
-    if (code !== 0) { job.status = 'error'; job.error = friendlyError(err || `yt-dlp exited with code ${code}`); return; }
-    finishJob(job, jobDir, null);
-  });
+  runYtDlpJob(job, jobDir);
   return job;
 }
+// Resume jobs that were downloading when the server restarted: the
+// .part files are still on disk and yt-dlp --continue picks them up.
+function recoverJobs() {
+  try {
+    for (const id of fs.readdirSync(jobsDir)) {
+      const dir = path.join(jobsDir, id);
+      let meta; try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { continue; }
+      if (!meta || !meta.url || jobs.has(id)) continue;
+      const finished = fs.readdirSync(dir).some(f => f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp') && fs.statSync(path.join(dir, f)).isFile());
+      const job = { id, url: meta.url, quality: meta.quality || 'best', status: finished ? 'ready' : 'downloading', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
+      jobs.set(id, job);
+      if (finished) finishJob(job, dir, null); else runYtDlpJob(job, dir);
+    }
+  } catch {}
+}
+recoverJobs();
 function cleanupJob(id) {
   const job = jobs.get(id); if (!job) return;
   jobs.delete(id);
