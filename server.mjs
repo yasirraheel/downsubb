@@ -212,8 +212,20 @@ function isDirectMedia(url) {
 // Pick the file a job should serve: a real video file first (largest),
 // never an audio-only part left behind when a merge did not run. A direct
 // audio link (e.g. a pasted .mp3) is fine when its extension matches the URL.
+// NEVER pick an unmerged yt-dlp part: when yt-dlp downloads video+audio
+// separately it writes "<title>.f<format-id>.mp4" parts and merges them
+// into "<title>.mp4". A deploy restart can kill yt-dlp between the
+// downloads and the merge, leaving a complete VIDEO-ONLY part on disk
+// (2026-11-12: an X video job was marked "ready" from its .fhls-807.mp4
+// part while the audio was still a .part file, so the user got a silent
+// video). recoverJobs() must resume such a job, not serve the part — so
+// part files are invisible here, and only the merged "<title>.mp4" (no
+// ".f<id>" segment) counts as finished. The ".f<id>" shape is kept
+// tight (digits / hls-… / http-… / sbN) so a title that merely ends in
+// ".f…" is not mistaken for a part.
+const PART_FILE = /\.f(?:\d+|hls-[\w-]+|http-[\w-]+|sb\d+)\.(mp4|webm|mkv|mov)$/i;
 function pickJobFile(job, jobDir) {
-  const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
+  const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp') && !PART_FILE.test(f));
   if (!files.length) return null;
   const videoExts = ['.mp4', '.webm', '.mkv', '.mov'];
   let pool = files.filter(f => videoExts.includes(path.extname(f).toLowerCase()));
@@ -256,7 +268,12 @@ function parseProgress(job, text) {
 }
 function runYtDlpJob(job, jobDir) {
   const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
-  const p = spawn(YTDLP, [...BASE_ARGS, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+  // --referer: the video page itself. Some CDNs refuse fragment
+  // requests without a Referer (RedTube's rdtcdn answers 410 Gone,
+  // so yt-dlp retries every fragment 10x and the job sits at 0%
+  // forever — proven 2026-11-12 on redtube.com/189933211). Sending
+  // the page URL as Referer is standard and harmless for other sites.
+  const p = spawn(YTDLP, [...BASE_ARGS, '--referer', job.url, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
   job.proc = p;
   let err = '';
   p.stdout.on('data', d => parseProgress(job, d.toString()));

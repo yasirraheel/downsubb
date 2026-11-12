@@ -1,6 +1,12 @@
 // SubDown — OUR OWN backend. Template design is the exact SaveFrom
 // capture the user sent; only the backend is ours (no SaveFrom API).
 (function () {
+  // Mobile menu first: hamburger toggles the header nav. Wired here,
+  // at the top, so it works even if later code in this file throws.
+  var menuBtn = document.querySelector('.menu-btn');
+  if (menuBtn) menuBtn.addEventListener('click', function () { document.body.classList.toggle('sd-nav-open'); });
+  document.querySelectorAll('#nav_top a').forEach(function (a) { a.addEventListener('click', function () { document.body.classList.remove('sd-nav-open'); }); });
+
   // Inject our own styles at runtime, so the layout never depends on a
   // cached stylesheet: centred result, spinner, professional buttons.
   var css = '#sf_result{max-width:960px;margin:0 auto;width:100%;box-sizing:border-box;text-align:center;padding:0 12px}' +
@@ -203,12 +209,7 @@
   });
 })();
 
-  // Mobile menu: hamburger toggles the header nav.
-  var menuBtn = document.querySelector('.menu-btn');
-  if (menuBtn) menuBtn.addEventListener('click', function () { document.body.classList.toggle('sd-nav-open'); });
-  document.querySelectorAll('#nav_top a').forEach(function (a) { a.addEventListener('click', function () { document.body.classList.remove('sd-nav-open'); }); });
-
-  // Clicking any platform icon focuses the link box so you can paste its link.
+// Clicking any platform icon focuses the link box so you can paste its link.
   document.querySelectorAll('.sd-float, .sd-hero-icons span, .footer_v2 span').forEach(function (el) {
     el.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); var inp = document.getElementById('sf_url'); if (inp) inp.focus(); });
   });
