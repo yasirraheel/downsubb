@@ -52,6 +52,21 @@ const REAL_HOME = path.resolve(root, '..', '..', '..', '..');
 const FFMPEG_CANDIDATES = [process.env.FFMPEG, path.join(root, 'ffmpeg'), path.join(REAL_HOME, 'bin', 'ffmpeg'), path.join(os.homedir(), 'bin', 'ffmpeg'), '/usr/bin/ffmpeg', 'ffmpeg'];
 const FFMPEG = FFMPEG_CANDIDATES.find(p => { try { return p && spawnSync(p, ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; } }) || null;
 const HAS_FFMPEG = !!FFMPEG;
+// ffprobe (for verifying a finished file really is the full video):
+// it ships next to ffmpeg in ~/bin, but NOT next to the app-dir ffmpeg.
+const FFPROBE_CANDIDATES = [process.env.FFPROBE, FFMPEG ? FFMPEG.replace(/ffmpeg$/, 'ffprobe') : null, path.join(REAL_HOME, 'bin', 'ffprobe'), path.join(os.homedir(), 'bin', 'ffprobe'), '/usr/bin/ffprobe', 'ffprobe'];
+const FFPROBE = FFPROBE_CANDIDATES.find(p => { try { return p && spawnSync(p, ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; } }) || null;
+// Duration of a finished media file in seconds (null when ffprobe is
+// missing or cannot read the file). Used to catch truncated downloads:
+// ffmpeg can exit 0 with only the first minute of an HLS stream.
+function probeDuration(file) {
+  if (!FFPROBE) return null;
+  try {
+    const r = spawnSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file], { encoding: 'utf8', timeout: 15000 });
+    const d = parseFloat((r.stdout || '').trim());
+    return Number.isFinite(d) && d > 0 ? d : null;
+  } catch { return null; }
+}
 // YouTube cookies (optional, for bot-check): set COOKIES_FILE in the
 // environment, or put a cookies.txt next to server.mjs. The file must
 // live OUTSIDE public_html so it is never web-accessible, and must
@@ -145,6 +160,9 @@ function friendlyError(raw, url) {
   if (s.includes('http error 404') || s.includes('not found')) return 'This video could not be found. Check the link and try again.';
   if (s.includes('http error 403') || s.includes('forbidden')) return 'That site refused the download. Try another link.';
   if (s.includes('timed out') || s.includes('timeout')) return 'That site took too long to respond. Please try again.';
+  // A download that stopped early (truncated file) — keep the plain
+  // wording so the user knows to try again, not that the link is bad.
+  if (s.includes('stopped early')) return raw;
   // Never show raw yt-dlp stderr (it leaks internal paths and looks broken).
   return 'Something went wrong while checking this link. Please check the link and try again.';
 }
@@ -538,7 +556,23 @@ function dispatchJob(job, jobDir) {
         } else if (m) job.progress = 50;
       });
       p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; pumpQueue(); });
-      p.on('close', code => { job.proc = null; if (job.status === 'cancelled') return; if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
+      p.on('close', code => {
+        job.proc = null; if (job.status === 'cancelled') return;
+        if (code !== 0) { finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); return; }
+        // ffmpeg can exit 0 with only the first minute of an HLS stream
+        // (a segment fetch hiccup stops the copy early, silently). The
+        // file then looks "ready" but is not the full video. Verify the
+        // real duration against the known one; if it is much shorter,
+        // drop the partial file and report an error so a retry fetches
+        // it fresh instead of serving the truncated file.
+        const got = probeDuration(outFile);
+        if (dur > 0 && got !== null && got < dur * 0.85) {
+          try { fs.unlinkSync(outFile); } catch {}
+          finishJob(job, jobDir, `The download stopped early (only ${Math.round(got)}s of ${Math.round(dur)}s). Please try again.`);
+          return;
+        }
+        finishJob(job, jobDir, null);
+      });
     }).catch(e => { job.status = 'error'; job.error = 'This Beeg video could not be found. The link may be wrong, or the video was removed.'; pumpQueue(); });
     return;
   }
