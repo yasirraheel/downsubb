@@ -144,16 +144,29 @@
   var input = document.getElementById('sf_url');
   var result = document.getElementById('sf_result');
   if (!form || !input || !result) return;
-  // Paste button: small white pill inside the input while it is empty;
-  // hides once a URL is in the box. The submit arrow stays visible always.
+  // Paste button: small white pill inside the input, shown INSTEAD of the
+  // submit arrow while the input is empty; once a URL is in the box the
+  // arrow comes back and Paste disappears. Only one is visible at a time.
+  var submitBtn = document.getElementById('sf_submit');
   var pasteBtn = document.getElementById('sf_paste');
   function syncPasteBtn() {
     var hasUrl = !!(input.value && input.value.trim());
     if (pasteBtn) pasteBtn.style.display = hasUrl ? 'none' : '';
+    if (submitBtn) submitBtn.style.display = hasUrl ? '' : 'none';
     if (form) form.classList.toggle('has-paste', !hasUrl);
   }
   input.addEventListener('input', syncPasteBtn);
   syncPasteBtn();
+  // Paste only if the clipboard holds a URL; anything else is ignored.
+  function pickUrlFromClipboard(text) {
+    if (!text) return '';
+    var t = text.trim();
+    if (!t) return '';
+    var m = t.match(/https?:\/\/[^\s"'<>]+/);
+    if (m) return m[0].replace(/[.,;:!?)]+$/, '');
+    if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(t)) return 'https://' + t;
+    return '';
+  }
   if (pasteBtn) {
     pasteBtn.addEventListener('click', async function () {
       var text = '';
@@ -162,10 +175,10 @@
           text = await navigator.clipboard.readText();
         }
       } catch (e) { text = ''; }
-      if (text) {
-        input.value = text.trim();
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }
+      var url = pickUrlFromClipboard(text);
+      if (!url) return; // clipboard has no URL: ignore
+      input.value = url;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
       input.focus();
     });
   }
