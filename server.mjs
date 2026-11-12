@@ -204,10 +204,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && !u.pathname.startsWith('/api/')) {
       // Static assets from public/ (exact template design: /build, /img, /font, /js, /subdown.js)
+      // Unknown pages fall back to the homepage instead of a blank
+      // "Not found" page (the template has many guide links we do not host).
       const rel = u.pathname === '/' || u.pathname === '/index.html' ? 'index.html' : u.pathname.replace(/^\/+/, '');
       const f = path.resolve(publicDir, rel);
-      if (!f.startsWith(publicDir) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return res.writeHead(404).end('Not found');
+      if (!f.startsWith(publicDir) || !fs.existsSync(f) || !fs.statSync(f).isFile()) {
+        res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
+      }
       res.writeHead(200, { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res); return;
+    }
+    if (req.method === 'POST' && u.pathname === '/') {
+      // A native form submit (JS off) lands here — show the homepage, never a blank 404.
+      res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
     }
     if (req.method === 'POST' && u.pathname === '/api/info') {
       const { url } = JSON.parse(await readBody(req) || '{}');
