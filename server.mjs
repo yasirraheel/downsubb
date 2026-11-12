@@ -694,7 +694,17 @@ const server = http.createServer(async (req, res) => {
         formats.push({ label, height: f.height });
       }
       formats.sort((a, b) => b.height - a.height);
-      sendJson(res, 200, { title: j.title, uploader: j.uploader || j.channel || '', duration: j.duration || 0, thumbnail: j.thumbnail || '', platform: detectPlatform(url), formats: formats.slice(0, 6), hasAudio: true, ffmpeg: HAS_FFMPEG });
+      // Audio-only media (SoundCloud, Mixcloud, podcasts): yt-dlp finds
+      // only audio streams (vcodec none, no height), so the video list
+      // above is empty. Offer an MP3 download instead of an empty list
+      // (an empty list makes the frontend show a "Download" button that
+      // can never work, because there is no video format to fetch).
+      let audioOnly = false;
+      if (!formats.length && (j.formats || []).some(f => f.vcodec === 'none' && f.acodec && f.acodec !== 'none')) {
+        audioOnly = true;
+        formats.push({ label: 'MP3 Audio', height: 'audio' });
+      }
+      sendJson(res, 200, { title: j.title, uploader: j.uploader || j.channel || '', duration: j.duration || 0, thumbnail: j.thumbnail || '', platform: detectPlatform(url), formats: formats.slice(0, 6), hasAudio: true, ffmpeg: HAS_FFMPEG, audioOnly });
       return;
     }
     // Job-based download (Hostinger-safe)
