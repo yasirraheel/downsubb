@@ -68,7 +68,7 @@ const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 // server IP; the web client is used when cookies are present, because
 // android does not support cookies.
 const PLAYER_CLIENT = COOKIES_FILE ? 'web' : 'android';
-const BASE_ARGS = ['--force-ipv4', '--js-runtimes', 'deno', '--extractor-args', `youtube:player_client=${PLAYER_CLIENT}`, ...(COOKIES_FILE ? ['--cookies', COOKIES_FILE] : [])];
+const BASE_ARGS = ['--force-ipv4', '--js-runtimes', 'deno', '--extractor-args', `youtube:player_client=${PLAYER_CLIENT}`, ...(COOKIES_FILE ? ['--cookies', COOKIES_FILE] : []), ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : [])];
 // Extra PATH for yt-dlp to find deno/node/ffmpeg on shared hosting.
 const CHILD_PATH = [path.join(os.homedir(), 'bin'), '/opt/alt/alt-nodejs20/root/usr/bin', process.env.PATH].filter(Boolean).join(':');
 const CHILD_ENV = { ...process.env, PATH: CHILD_PATH };
@@ -200,14 +200,35 @@ function beegVariantFor(info, quality) {
 function isDirectMedia(url) {
   try { const p = new URL(url).pathname.toLowerCase(); return /\.(mp4|webm|mov|mkv|m3u8|mp3|m4a|wav|avi)$/.test(p); } catch { return false; }
 }
+// Pick the file a job should serve: a real video file first (largest),
+// never an audio-only part left behind when a merge did not run. A direct
+// audio link (e.g. a pasted .mp3) is fine when its extension matches the URL.
+function pickJobFile(job, jobDir) {
+  const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
+  if (!files.length) return null;
+  const videoExts = ['.mp4', '.webm', '.mkv', '.mov'];
+  let pool = files.filter(f => videoExts.includes(path.extname(f).toLowerCase()));
+  if (!pool.length) {
+    let urlExt = ''; try { urlExt = path.extname(new URL(job.url).pathname).toLowerCase(); } catch {}
+    if (urlExt) pool = files.filter(f => path.extname(f).toLowerCase() === urlExt);
+  }
+  if (!pool.length && job.quality === 'audio') pool = files;
+  if (!pool.length) return null;
+  pool.sort((a, b) => fs.statSync(path.join(jobDir, b)).size - fs.statSync(path.join(jobDir, a)).size);
+  return path.join(jobDir, pool[0]);
+}
 function finishJob(job, jobDir, errText) {
   if (job.status === 'error') return;
   if (errText) { job.status = 'error'; job.error = friendlyError(errText); return; }
   try {
     // Finished media only: ignore resume state (.part/.ytdl) and meta.json.
-    const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
-    if (!files.length) { job.status = 'error'; job.error = 'Download finished on the server but no file was created.'; return; }
-    const file = path.join(jobDir, files[0]);
+    const file = pickJobFile(job, jobDir);
+    if (!file) {
+      const anyFile = fs.readdirSync(jobDir).some(f => f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
+      job.status = 'error';
+      job.error = anyFile ? 'The video could not be assembled on the server (merging failed). Please try again.' : 'Download finished on the server but no file was created.';
+      return;
+    }
     job.size = fs.statSync(file).size;
     if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; return; }
     job.file = file;
@@ -299,7 +320,7 @@ function recoverJobs() {
       const dir = path.join(jobsDir, id);
       let meta; try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { continue; }
       if (!meta || !meta.url || jobs.has(id)) continue;
-      const finished = fs.readdirSync(dir).some(f => f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp') && fs.statSync(path.join(dir, f)).isFile());
+      const finished = !!pickJobFile({ url: meta.url, quality: meta.quality || 'best' }, dir);
       const job = { id, url: meta.url, quality: meta.quality || 'best', status: finished ? 'ready' : 'downloading', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
       jobs.set(id, job);
       if (finished) finishJob(job, dir, null); else runYtDlpJob(job, dir);
