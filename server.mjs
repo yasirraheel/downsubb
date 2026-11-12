@@ -301,6 +301,7 @@ async function bilibiliFileUrl(info, quality) {
   const q = info.bvid ? `bvid=${info.bvid}` : `aid=${info.aid}`;
   const data = await bilibiliApi(`/x/player/playurl?${q}&cid=${info.cid}&qn=${bilibiliQn(quality)}&fnval=1`, info.buvid3);
   const durl = data.durl?.[0];
+  console.error(`[bilibili] playurl q=${quality} qn=${bilibiliQn(quality)} -> quality=${data.quality} format=${data.format} durlSize=${durl ? durl.size : 'none'}`);
   if (!durl?.url) throw new Error('No downloadable file for this Bilibili video.');
   return { url: durl.url, size: durl.size || 0 };
 }
@@ -336,6 +337,7 @@ function runBilibiliJob(job, jobDir) {
         // still exit 0 — so check the size before calling it ready.
         if (expectedSize > 0) {
           let got = 0; try { got = fs.statSync(mp4File).size; } catch {}
+          console.error(`[bilibili] done code=${code} expected=${expectedSize} got=${got}`);
           if (got < expectedSize * 0.9) {
             job.status = 'error';
             job.error = 'The download stopped early (only part of the video arrived). Please try again.';
