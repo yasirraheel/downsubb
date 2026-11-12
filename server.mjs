@@ -108,7 +108,12 @@ function friendlyError(raw) {
   if (s.includes('age')) return 'This video is age-restricted and needs a logged-in account.';
   if (s.includes('unsupported url') || s.includes('no video formats')) return 'This link is not a supported public video link, or the video has no downloadable formats.';
   if (s.includes('video unavailable') || s.includes('removed') || s.includes('deleted')) return 'This video is unavailable, removed, or deleted.';
-  return raw.split('\n').filter(l => l.trim()).slice(-3).join(' ').slice(0, 300) || 'Could not download this video.';
+  if (s.includes('unable to download json metadata') || s.includes('http error 400') || s.includes('bad request')) return 'This video could not be found on that site. The link may be wrong, or the video was removed.';
+  if (s.includes('http error 404') || s.includes('not found')) return 'This video could not be found. Check the link and try again.';
+  if (s.includes('http error 403') || s.includes('forbidden')) return 'That site refused the download. Try another link.';
+  if (s.includes('timed out') || s.includes('timeout')) return 'That site took too long to respond. Please try again.';
+  // Never show raw yt-dlp stderr (it leaks internal paths and looks broken).
+  return 'Something went wrong while checking this link. Please check the link and try again.';
 }
 function sendJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); }
 function readBody(req) { return new Promise((resolve, reject) => { let b = ''; req.on('data', d => { b += d; if (b.length > 10000) req.destroy(); }); req.on('end', () => resolve(b)); req.on('error', reject); }); }
