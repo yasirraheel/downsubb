@@ -1,11 +1,11 @@
-# SubDown — live video downloader
+# VidSnap — live video downloader
 
 Single interface, server-first download.
 
 ## What this is
 - One page: paste any public video link (YouTube, TikTok, Instagram,
   Facebook, X, Vimeo, Dailymotion, Reddit, …), pick a quality, download.
-- The uploaded `SubDown-clean.zip` is **template only** — a cleaned
+- The uploaded `VidSnap-clean.zip` is **template only** — a cleaned
   SaveFrom.net capture with no downloader backend (`savefrom.php` was
   missing, the form was visual-only). **All of its backend / API URLs
   are ignored.** No SaveFrom API, and no third-party downloader API,
@@ -39,7 +39,7 @@ node server.mjs   # http://127.0.0.1:4175/
 This VM is not permanent hosting. For a public live site you need:
 1. A VPS (not shared Hostinger PHP hosting — it cannot run a persistent
    Node process / yt-dlp / ffmpeg), e.g. Hostinger VPS, DigitalOcean, Hetzner.
-2. A domain / subdomain pointing at that VPS, e.g. `subdown.yourdomain.com`.
+2. A domain / subdomain pointing at that VPS, e.g. `vidsnap.yourdomain.com`.
 3. On the VPS: Node 18+, Python 3, ffmpeg, `bash install.sh`, then a
    process manager (systemd / pm2) and a reverse proxy (nginx + HTTPS).
 Tell me the domain and VPS/hosting you want to use and I will prepare the deploy steps / systemd + nginx config for it.

@@ -1,4 +1,4 @@
-# SubDown — Hostinger Unlimited deploy guide
+# VidSnap — Hostinger Unlimited deploy guide
 
 Plan confirmed by the user on 2026-11-12: **Hostinger Unlimited**.
 No VPS needed if the steps below work — Unlimited supports Node.js
@@ -6,7 +6,7 @@ web apps via hPanel. If ffmpeg is missing on the host, the server
 automatically falls back to single-file mode (up to 720p, no merging).
 
 ## What is in the deploy zip
-`subdown-live-deploy.zip`:
+`vidsnap-live-deploy.zip`:
 - `server.mjs` — our own backend (Node, no dependencies)
 - `package.json` — `npm start` runs `node server.mjs`
 - `public/index.html` — single-interface UI
@@ -18,9 +18,9 @@ Do NOT upload `.jobs/`, `.venv/`, or `node_modules/`.
 ## Deploy in hPanel
 1. hPanel → Websites → Add Website → **Node.js Web App**
    (on older hPanel: Advanced → Node.js → Create Application)
-2. Domain / subdomain choose karo, e.g. `subdown.yourdomain.com`
+2. Domain / subdomain choose karo, e.g. `vidsnap.yourdomain.com`
 3. Node.js version: **20** (22 bhi chalega; 18 EOL hai, avoid karo)
-4. Upload `subdown-live-deploy.zip`, ya Git repo connect karo
+4. Upload `vidsnap-live-deploy.zip`, ya Git repo connect karo
 5. Application startup file: `server.mjs`
 6. Environment variables:
    - `NODE_ENV` = `production`
