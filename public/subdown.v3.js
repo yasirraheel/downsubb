@@ -62,6 +62,7 @@
     var stEl = row.querySelector('.sd-qstatus'), actEl = row.querySelector('.sd-qact');
     try {
       var pr = await fetch('/api/jobs/' + e.jobId);
+      if (pr.status === 404) { stEl.textContent = 'Expired - start it again from the link above'; actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>'; return; }
       if (!pr.ok) throw new Error('gone');
       var j = await pr.json();
       if (j.status === 'ready') {

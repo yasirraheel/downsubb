@@ -306,13 +306,13 @@ function cleanupJob(id) {
   jobs.delete(id);
   if (job.file) { try { fs.rmSync(path.dirname(job.file), { recursive: true, force: true }); } catch {} }
 }
-// Clean up old jobs every hour. Ready files stay 12 hours so the
+// Clean up old jobs every hour. Ready files stay 24 hours so the
 // browser queue ("Your downloads") still works on a later visit;
 // downloading/error jobs expire after 1 hour.
 setInterval(() => {
   const now = Date.now();
   for (const [id, job] of jobs) {
-    const ttl = job.status === 'ready' ? 12 * 60 * 60 * 1000 : 60 * 60 * 1000;
+    const ttl = job.status === 'ready' ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
     if (now - job.createdAt > ttl) cleanupJob(id);
   }
 }, 60 * 60 * 1000);
