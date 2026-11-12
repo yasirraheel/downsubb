@@ -205,7 +205,7 @@ function fetchText(url, referer, extraHeaders) {
 // fetches it (it can reach the CDNs) and streams it back. Only known
 // thumbnail hosts are allowed, only images, max 5 MB, cached on disk
 // for 7 days so repeat views cost nothing.
-const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com'];
+const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com', 'sndcdn.com'];
 const thumbsDir = path.join(root, '.thumbs');
 fs.mkdirSync(thumbsDir, { recursive: true });
 function thumbHostOk(hostname) {
