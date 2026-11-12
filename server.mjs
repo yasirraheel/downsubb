@@ -323,6 +323,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
     }
+    if (req.method === 'GET' && (u.pathname === '/terms' || u.pathname === '/privacy')) {
+      const f = path.join(publicDir, u.pathname.slice(1) + '.html');
+      res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(f).pipe(res); return;
+    }
     if (req.method === 'GET' && !u.pathname.startsWith('/api/')) {
       // Static assets from public/ (exact template design: /build, /img, /font, /js, /subdown.js)
       // Unknown pages fall back to the homepage instead of a blank
