@@ -17,7 +17,8 @@
     '@keyframes sd-rot{to{transform:rotate(360deg)}}' +
     '.sd-cancel{display:inline-block;margin:5px;padding:10px 18px;cursor:pointer;border:2px solid #dc3545;border-radius:8px;background:#fff;color:#b02a37;font-size:14px;font-weight:700}' +
     '.faq_item_title{cursor:pointer}' +
-    '.sd-dl{display:inline-block;margin-top:10px;padding:13px 26px;background:#84bd07;color:#fff!important;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none}';
+    '.sd-dl{display:inline-block;margin-top:10px;padding:13px 26px;background:#84bd07;color:#fff!important;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;max-width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:anywhere;word-break:break-word;text-align:center;line-height:1.4}' +
+    '@media (max-width:600px){.sd-card{padding:16px 12px;margin:14px auto}.sd-card h3{font-size:17px}.sd-card img{max-width:100%}.sd-q,.sd-mp3{padding:10px 13px;font-size:14px;margin:4px 3px}.sd-status{flex-wrap:wrap;justify-content:center;text-align:center}.sd-error{padding:14px}.sd-dl{padding:12px 16px;font-size:15px}}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
   // ---- Your downloads, kept in this browser (localStorage) ----
@@ -177,7 +178,9 @@
             if (!j.status) { stopPoll(job.jobId); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
             if (j.status === 'ready') {
               stopPoll(job.jobId);
-              stEl.innerHTML = '<a class="sd-dl" href="/api/jobs/' + j.jobId + '/file">Download ' + esc(j.name || 'video') + ' (' + Math.round((j.size || 0) / 1048576 * 10) / 10 + ' MB)</a>';
+              var mb = Math.round((j.size || 0) / 1048576 * 10) / 10;
+              var dlLabel = window.innerWidth <= 600 ? 'Download (' + mb + ' MB)' : 'Download ' + esc(j.name || 'video') + ' (' + mb + ' MB)';
+              stEl.innerHTML = '<a class="sd-dl" href="/api/jobs/' + j.jobId + '/file">' + dlLabel + '</a>' + (window.innerWidth <= 600 ? '<div style="font-size:12px;color:#777;margin-top:6px;overflow-wrap:anywhere">' + esc(j.name || '') + '</div>' : '');
               renderQueue();
             } else if (j.status === 'error') {
               stopPoll(job.jobId);
