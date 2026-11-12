@@ -447,6 +447,21 @@ function finishJob(job, jobDir, errText) {
       job.error = anyFile ? 'The video could not be prepared (merging failed). Please try again.' : 'The download finished but no file was created.';
       pumpQueue(); return;
     }
+    // A truncated file must never be served as "ready": ffmpeg can exit
+    // 0 with only the first minute of an HLS stream, and a server
+    // restart can recover a half-written file the same way. When the
+    // expected duration is known, verify the real one; if it is much
+    // shorter, drop the partial file and report an error so a retry
+    // fetches it fresh.
+    if (job.duration > 0) {
+      const got = probeDuration(file);
+      if (got !== null && got < job.duration * 0.85) {
+        try { fs.unlinkSync(file); } catch {}
+        job.status = 'error';
+        job.error = `The download stopped early (only ${Math.round(got)}s of ${Math.round(job.duration)}s). Please try again.`;
+        pumpQueue(); return;
+      }
+    }
     job.size = fs.statSync(file).size;
     if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; pumpQueue(); return; }
     job.file = file;
@@ -541,6 +556,11 @@ function dispatchJob(job, jobDir) {
     getBeegInfo(bid).then(info => {
       const variant = beegVariantFor(info, job.quality);
       const outFile = path.join(jobDir, `${safeName(info.title)}.mp4`);
+      // Remember the expected duration on the job (and on disk) so
+      // finishJob can reject a truncated file — including one recovered
+      // after a server restart, where the close handler never runs.
+      job.duration = info.duration || 0;
+      try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url, quality: job.quality, duration: job.duration, createdAt: job.createdAt || Date.now() })); } catch {}
       const args = ['-y', '-hide_banner', '-loglevel', 'info', '-headers', 'Referer: https://beeg.com/', '-user_agent', 'Mozilla/5.0', '-i', variant.variantUrl, '-c', 'copy', outFile];
       const p = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
       job.proc = p;
@@ -559,18 +579,9 @@ function dispatchJob(job, jobDir) {
       p.on('close', code => {
         job.proc = null; if (job.status === 'cancelled') return;
         if (code !== 0) { finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); return; }
-        // ffmpeg can exit 0 with only the first minute of an HLS stream
-        // (a segment fetch hiccup stops the copy early, silently). The
-        // file then looks "ready" but is not the full video. Verify the
-        // real duration against the known one; if it is much shorter,
-        // drop the partial file and report an error so a retry fetches
-        // it fresh instead of serving the truncated file.
-        const got = probeDuration(outFile);
-        if (dur > 0 && got !== null && got < dur * 0.85) {
-          try { fs.unlinkSync(outFile); } catch {}
-          finishJob(job, jobDir, `The download stopped early (only ${Math.round(got)}s of ${Math.round(dur)}s). Please try again.`);
-          return;
-        }
+        // finishJob verifies the real duration against job.duration
+        // (set above) and rejects a truncated file, so a retry fetches
+        // it fresh instead of serving the partial file as "ready".
         finishJob(job, jobDir, null);
       });
     }).catch(e => { job.status = 'error'; job.error = 'This Beeg video could not be found. The link may be wrong, or the video was removed.'; pumpQueue(); });
@@ -603,7 +614,7 @@ function startJob(url, quality) {
   try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url, quality, createdAt: Date.now() })); } catch {}
   const existing = jobs.get(id);
   if (existing && (existing.status === 'downloading' || existing.status === 'queued' || existing.status === 'ready')) return existing;
-  const job = { id, url, quality, status: 'queued', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
+  const job = { id, url, quality, duration: 0, status: 'queued', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
   jobs.set(id, job);
   pumpQueue();
   return job;
@@ -617,7 +628,7 @@ function recoverJobs() {
       let meta; try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { continue; }
       if (!meta || !meta.url || jobs.has(id)) continue;
       const finished = !!pickJobFile({ url: meta.url, quality: meta.quality || 'best' }, dir);
-      const job = { id, url: meta.url, quality: meta.quality || 'best', status: finished ? 'ready' : 'queued', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
+      const job = { id, url: meta.url, quality: meta.quality || 'best', duration: meta.duration || 0, status: finished ? 'ready' : 'queued', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
       jobs.set(id, job);
       if (finished) finishJob(job, dir, null);
     }
