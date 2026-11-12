@@ -93,10 +93,12 @@ body{padding-top:63px}
 .search-panel__mobile .downloader-2 .link-form .submit:before{content:"";position:absolute;left:50%;top:50%;width:24px;height:66px;margin:-33px 0 0 -12px;background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAADSCAYAAABQBAAqAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAz9JREFUeNrsm19oTmEcx8/7TutdkiS2pJX8GXLlggu1TNrFTIQNF66RC0kmZUWvf41IXje4kNrVrDApSki5U3KDxDssksbElr97fX/O79Sz03nP3vec56zG91ef7ZzzPu/5nOffOev89qQKhYKTZKSdhIMCCiiggAIKKKCAAjcmyI+WluVRvlsPtoC3eqGXwPNAQcSoBBvBOxV8BKdsNtEdcA/MA3PASdBsU/AbrAZPjWNXQJ3tTm4ytivALZCxKciDDcZ+Lbhhe5h2g+PGfgPImaNoN2gFPyIKvgVc7A7pH0+wRLEdZ8ZmJiMe6ViOM2SleZf5jq/1BEeVOJH1CQ6Bq7aaqBHsN/avg3Zbw7RaZ7AXvWC9zXkgk6rK2F9pDve4gk6w2OxU8MLW7VqeB6vAGyCvCy5Ip/oLpfgqgQIKKKCAAgoooIACCiiggAIKKKCAAgr+L0HUt44lZaDiCErKQP0Nea0ZgQrQUxgZzUFlowo8nhiCX6DOtmCWrxavQMYsE3cUhWag4vSBnw5fTXLeZzKKEstAgZwIEstAgb6kZ3K/1CCxDBS4b6uTs75OztqaB0Kj7+Q9NidaNRgyTp4HlTYnWmgGKu5E6/Q1zRqbN7t6MABe6/2nvVhZZqEooIACCiiggAIKKKCAAgoooIACCij4twQjMiAhC35WOO6SixrwARx23LRKYHR13Q0WhMRUx13+IjWeBKbbbiJ5ffxTt+W15ZBtgb9cIWnBsG1BaixrUEiiBmlfLYbHXSenku7k9Ljp5IxjLFYrcx5U6b1qYtgX14EDYGaZ80CyWAfBEbAgTLAI7AUdYHbIMDUFC8FpsMdxE36hNRjU35sddxFPQ8BJ5cb33aixrKZr0mPvHTf1WFTQBz7r9lJwXh4TelXeHfQLmAy26TNivh6X9PsDlRR9HlwD08AuMEOb6QQYMMqKbKd+7j0X8tr+3Vq2qOCTnrBXvzDXcXPEtUaZKYoXj0EbuFnOPLis/XB7lGEu685ai518tIn2EGzVfhj0fSb9cRZsB89KfugHhCz92gdearvXaCfKvzic0yZ14ggk+sEx8BVsAhf1L4qSMuhM1FFAAQUUUEABBRS48UeAAQAIIUP8NQ3fBwAAAABJRU5ErkJggg==");background-position:50% -6px;background-repeat:no-repeat;opacity:0;transition:transform .35s ease,opacity .15s ease}
 .search-panel__mobile .downloader-2 .link-form .submit:hover{background-image:none;background-color:#6da305}
 .search-panel__mobile .downloader-2 .link-form .submit:hover:before{opacity:1;transform:rotate(90deg)}
-.downloader-container .downloader-2 .link-form .paste-btn{color:#fff;background:#85be07;border:none;margin:2px;width:76px;height:56px;box-shadow:none;border-radius:0;font-size:15px;font-weight:700;cursor:pointer}
-.downloader-container .downloader-2 .link-form .paste-btn:hover{background:#6da305}
-.search-panel__mobile .downloader-2 .link-form .paste-btn{border:5px solid #7ed214;background-color:#7ed214;height:66px;width:76px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;border-top-right-radius:5px;border-bottom-right-radius:5px}
-.search-panel__mobile .downloader-2 .link-form .paste-btn:hover{background-color:#6da305;border-color:#6da305}
+.downloader-2 .tarea-wrap .paste-btn{position:absolute;top:50%;right:8px;transform:translateY(-50%);display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e3e3e3;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.12);color:#5b5bd6;font-size:14px;font-weight:600;padding:0 12px;height:40px;cursor:pointer;z-index:2}
+.downloader-2 .tarea-wrap .paste-btn:hover{background:#f5f5ff;border-color:#c9c9f5}
+.downloader-2 .tarea-wrap .paste-btn svg{width:16px;height:16px;flex:none}
+.downloader-container .downloader-2 .link-form.has-paste .tarea-wrap input{padding-right:112px}
+.search-panel__mobile .downloader-2 .tarea-wrap .paste-btn{right:10px;height:34px;font-size:13px;padding:0 10px;border-radius:5px}
+.search-panel__mobile .downloader-2 .link-form.has-paste .tarea-wrap input{padding-right:102px}
 .sd-float,.sd-hero-icons span,.footer_v2 span{cursor:pointer;transition:transform .25s ease,box-shadow .25s ease}
 .sd-float:hover{animation-play-state:paused;transform:scale(1.22) rotate(var(--r,0deg)) translateY(-4px)!important;box-shadow:0 14px 28px rgba(0,0,0,.22);outline:2px solid #84bd07;outline-offset:2px;z-index:6}
 .sd-hero-icons span:hover{transform:scale(1.22) translateY(-3px);box-shadow:0 10px 20px rgba(0,0,0,.20);outline:2px solid #84bd07;outline-offset:1px}
@@ -165,11 +167,11 @@ body{padding-top:63px}
                                             <div class="tarea-wrap">
                                                 <input type="text" name="sf_url" value="" autofocus placeholder="Paste your video link here" id="sf_url" onfocus="if(this.value && this.select){this.select()}">
                                                 <a href="/" class="clear-btn"></a>
+                                                <button type="button" id="sf_paste" class="paste-btn" aria-label="Paste link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>Paste</button>
                                             </div>
                                         </div>
                                         <div class="r-box">
                                             <button type="submit" name="sf_submit" id="sf_submit" class="submit" aria-label="Search"></button>
-                                            <button type="button" id="sf_paste" class="paste-btn" aria-label="Paste link">Paste</button>
                                         </div>
                                     </div>
                                     <div class="services clearfix"></div>
@@ -544,7 +546,7 @@ body{padding-top:63px}
     </script>
     
 <script src="/js/libs/jquery-3.6.0.min.js"></script>
-<script src="/subdown.v3.js?v=19"></script>
+<script src="/subdown.v3.js?v=20"></script>
 </body>
 
 </html>

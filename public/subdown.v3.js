@@ -144,14 +144,13 @@
   var input = document.getElementById('sf_url');
   var result = document.getElementById('sf_result');
   if (!form || !input || !result) return;
-  // Paste button: shown instead of the submit arrow while the input is
-  // empty; once a URL is in the box the arrow comes back.
-  var submitBtn = document.getElementById('sf_submit');
+  // Paste button: small white pill inside the input while it is empty;
+  // hides once a URL is in the box. The submit arrow stays visible always.
   var pasteBtn = document.getElementById('sf_paste');
   function syncPasteBtn() {
     var hasUrl = !!(input.value && input.value.trim());
     if (pasteBtn) pasteBtn.style.display = hasUrl ? 'none' : '';
-    if (submitBtn) submitBtn.style.display = hasUrl ? '' : 'none';
+    if (form) form.classList.toggle('has-paste', !hasUrl);
   }
   input.addEventListener('input', syncPasteBtn);
   syncPasteBtn();
