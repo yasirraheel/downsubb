@@ -33,6 +33,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 // yt-dlp binary: env override, else bundled standalone ./yt-dlp, else PATH
 const localYtDlp = path.join(root, 'yt-dlp');
 const YTDLP = process.env.YTDLP || (fs.existsSync(localYtDlp) ? localYtDlp : 'yt-dlp');
+// GitHub pushes lose the executable bit, which used to break yt-dlp
+// with EACCES after a git pull — make sure it is executable on start.
+for (const f of [localYtDlp, path.join(root, 'yt-dlp.bin')]) { try { if (fs.existsSync(f)) fs.chmodSync(f, 0o755); } catch {} }
 // ffmpeg: check env, ~/bin, then PATH. Static ffmpeg 7.0.2 was
 // installed on Hostinger at ~/bin/ffmpeg (no login, no API needed).
 // It is used for merging AND for direct .mp4/.m3u8 links, which need
