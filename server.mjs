@@ -142,7 +142,7 @@ function friendlyError(raw) {
   // Never show raw yt-dlp stderr (it leaks internal paths and looks broken).
   return 'Something went wrong while checking this link. Please check the link and try again.';
 }
-function sendJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); }
+function sendJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
 function readBody(req) { return new Promise((resolve, reject) => { let b = ''; req.on('data', d => { b += d; if (b.length > 10000) req.destroy(); }); req.on('end', () => resolve(b)); req.on('error', reject); }); }
 function safeName(s) { return (s || 'video').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'video'; }
 
@@ -342,7 +342,7 @@ function runBilibiliJob(job, jobDir) {
           job.progress = Math.min(99, Math.round(secs / dur * 100));
         } else if (m) job.progress = 50;
       });
-      p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+      p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; pumpQueue(); });
       p.on('close', code => {
         job.proc = null;
         if (job.status === 'cancelled') return;
@@ -356,7 +356,7 @@ function runBilibiliJob(job, jobDir) {
             job.status = 'error';
             job.error = 'The download stopped early (only part of the video arrived). Please try again.';
             try { fs.rmSync(mp4File, { force: true }); } catch {}
-            return;
+            pumpQueue(); return;
           }
         }
         if (job.quality === 'audio') {
@@ -364,7 +364,7 @@ function runBilibiliJob(job, jobDir) {
           job.proc = c;
           let cerr = '';
           c.stderr.on('data', d => { cerr += d; });
-          c.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+          c.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; pumpQueue(); });
           c.on('close', ccode => {
             job.proc = null;
             if (job.status === 'cancelled') return;
@@ -376,8 +376,8 @@ function runBilibiliJob(job, jobDir) {
         }
         finishJob(job, jobDir, null);
       });
-    } catch (e) { job.status = 'error'; job.error = 'This Bilibili video could not be downloaded. The link may be wrong, or the video was removed.'; }
-  }).catch(e => { job.status = 'error'; job.error = 'This Bilibili video could not be found. The link may be wrong, or the video was removed.'; });
+    } catch (e) { job.status = 'error'; job.error = 'This Bilibili video could not be downloaded. The link may be wrong, or the video was removed.'; pumpQueue(); }
+  }).catch(e => { job.status = 'error'; job.error = 'This Bilibili video could not be found. The link may be wrong, or the video was removed.'; pumpQueue(); });
 }
 function isDirectMedia(url) {
   try { const p = new URL(url).pathname.toLowerCase(); return /\.(mp4|webm|mov|mkv|m3u8|mp3|m4a|wav|avi)$/.test(p); } catch { return false; }
@@ -413,7 +413,7 @@ function pickJobFile(job, jobDir) {
 }
 function finishJob(job, jobDir, errText) {
   if (job.status === 'error') return;
-  if (errText) { job.status = 'error'; job.error = friendlyError(errText); return; }
+  if (errText) { job.status = 'error'; job.error = friendlyError(errText); pumpQueue(); return; }
   try {
     // Finished media only: ignore resume state (.part/.ytdl) and meta.json.
     const file = pickJobFile(job, jobDir);
@@ -421,18 +421,41 @@ function finishJob(job, jobDir, errText) {
       const anyFile = fs.readdirSync(jobDir).some(f => f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
       job.status = 'error';
       job.error = anyFile ? 'The video could not be prepared (merging failed). Please try again.' : 'The download finished but no file was created.';
-      return;
+      pumpQueue(); return;
     }
     job.size = fs.statSync(file).size;
-    if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; return; }
+    if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; pumpQueue(); return; }
     job.file = file;
     job.name = `${safeName(path.basename(file, path.extname(file)))}.${path.extname(file).slice(1) || 'mp4'}`;
     job.status = 'ready'; job.progress = 100;
   } catch (e) { job.status = 'error'; job.error = e.message; }
+  pumpQueue();
 }
 
 // ---- background jobs ----
 const jobs = new Map(); // id -> {id, url, quality, status, progress, error, file, size, name, createdAt}
+// Download queue: at most MAX_CONCURRENT downloads run at once, the
+// rest wait in line with status 'queued' (oldest first). This keeps
+// the site up when many users download at once: a burst of 50 users
+// means 5 downloading and 45 waiting, not 50 yt-dlp processes at
+// once on shared hosting. The queue lives inside this process: every
+// download finishing frees a slot and pumps the queue, and
+// recoverJobs() re-queues anything left over after a restart, so no
+// cron job is needed to run it.
+const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_DOWNLOADS || 5);
+function activeDownloads() { let n = 0; for (const j of jobs.values()) if (j.status === 'downloading') n++; return n; }
+function queuePositionOf(job) {
+  const q = [...jobs.values()].filter(j => j.status === 'queued').sort((a, b) => a.createdAt - b.createdAt);
+  return q.findIndex(j => j.id === job.id) + 1;
+}
+function pumpQueue() {
+  while (activeDownloads() < MAX_CONCURRENT) {
+    const next = [...jobs.values()].filter(j => j.status === 'queued').sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (!next) return;
+    next.status = 'downloading';
+    dispatchJob(next, path.join(jobsDir, next.id));
+  }
+}
 // One job id per link+quality, so a retry resumes the same .part files.
 function jobIdFor(url, quality) { return crypto.createHash('sha256').update(url + '|' + quality).digest('hex').slice(0, 16); }
 function parseProgress(job, text) {
@@ -465,7 +488,7 @@ function runYtDlpJob(job, jobDir) {
   let err = '';
   p.stdout.on('data', d => parseProgress(job, d.toString()));
   p.stderr.on('data', d => { err += d; parseProgress(job, err); });
-  p.on('error', e => { job.status = 'error'; job.error = `yt-dlp not found at ${YTDLP}. (${e.message})`; });
+  p.on('error', e => { job.status = 'error'; job.error = `yt-dlp not found at ${YTDLP}. (${e.message})`; pumpQueue(); });
   p.on('close', code => {
     job.proc = null;
     if (job.status === 'error' || job.status === 'cancelled') return;
@@ -477,27 +500,22 @@ function runYtDlpJob(job, jobDir) {
         setTimeout(() => { if (job.status !== 'cancelled') runYtDlpJob(job, jobDir); }, delay);
         return;
       }
-      job.status = 'error'; job.error = friendlyError(msg); return;
+      job.status = 'error'; job.error = friendlyError(msg); pumpQueue(); return;
     }
     finishJob(job, jobDir, null);
   });
 }
-function startJob(url, quality) {
-  const id = jobIdFor(url, quality);
-  const jobDir = path.join(jobsDir, id);
-  fs.mkdirSync(jobDir, { recursive: true });
-  // Keep the link on disk so a server restart can resume this job.
-  try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url, quality, createdAt: Date.now() })); } catch {}
-  const existing = jobs.get(id);
-  if (existing && (existing.status === 'downloading' || existing.status === 'ready')) return existing;
-  const job = { id, url, quality, status: 'downloading', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
-  jobs.set(id, job);
+// Start the actual download for a job (yt-dlp, or the native Beeg /
+// Bilibili / direct-media paths). Called by startJob when a slot is
+// free, and by pumpQueue() when a queued job reaches the front.
+function dispatchJob(job, jobDir) {
+  const url = job.url;
   // Beeg: native ffmpeg download (yt-dlp cannot do it: broken extractor
   // + CDN 403s fragments without a Referer, which ffmpeg sends).
   const bid = beegId(url);
   if (bid && FFMPEG) {
     getBeegInfo(bid).then(info => {
-      const variant = beegVariantFor(info, quality);
+      const variant = beegVariantFor(info, job.quality);
       const outFile = path.join(jobDir, `${safeName(info.title)}.mp4`);
       const args = ['-y', '-hide_banner', '-loglevel', 'info', '-headers', 'Referer: https://beeg.com/', '-user_agent', 'Mozilla/5.0', '-i', variant.variantUrl, '-c', 'copy', outFile];
       const p = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
@@ -513,15 +531,15 @@ function startJob(url, quality) {
           job.progress = Math.min(99, Math.round(secs / dur * 100));
         } else if (m) job.progress = 50;
       });
-      p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+      p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; pumpQueue(); });
       p.on('close', code => { job.proc = null; if (job.status === 'cancelled') return; if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
-    }).catch(e => { job.status = 'error'; job.error = 'This Beeg video could not be found. The link may be wrong, or the video was removed.'; });
-    return job;
+    }).catch(e => { job.status = 'error'; job.error = 'This Beeg video could not be found. The link may be wrong, or the video was removed.'; pumpQueue(); });
+    return;
   }
   // Bilibili: native API download (yt-dlp cannot: bilibili.com 412s
   // the webpage from this IP, so it finds no formats at all).
   const bili = bilibiliId(url);
-  if (bili && FFMPEG) { runBilibiliJob(job, jobDir); return job; }
+  if (bili && FFMPEG) { runBilibiliJob(job, jobDir); return; }
   // Direct media: ffmpeg trick, no login/API.
   if (isDirectMedia(url) && FFMPEG) {
     const ext = new URL(url).pathname.split('.').pop().toLowerCase().split('?')[0] || 'mp4';
@@ -531,11 +549,23 @@ function startJob(url, quality) {
     job.proc = p;
     let err = '';
     p.stderr.on('data', d => { err += d; const m = err.match(/time=(\d+):(\d+):(\d+)/g); if (m) job.progress = 50; });
-    p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+    p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; pumpQueue(); });
     p.on('close', code => { job.proc = null; if (job.status === 'cancelled') return; if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
-    return job;
+    return;
   }
   runYtDlpJob(job, jobDir);
+}
+function startJob(url, quality) {
+  const id = jobIdFor(url, quality);
+  const jobDir = path.join(jobsDir, id);
+  fs.mkdirSync(jobDir, { recursive: true });
+  // Keep the link on disk so a server restart can resume this job.
+  try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url, quality, createdAt: Date.now() })); } catch {}
+  const existing = jobs.get(id);
+  if (existing && (existing.status === 'downloading' || existing.status === 'queued' || existing.status === 'ready')) return existing;
+  const job = { id, url, quality, status: 'queued', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
+  jobs.set(id, job);
+  pumpQueue();
   return job;
 }
 // Resume jobs that were downloading when the server restarted: the
@@ -547,19 +577,19 @@ function recoverJobs() {
       let meta; try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { continue; }
       if (!meta || !meta.url || jobs.has(id)) continue;
       const finished = !!pickJobFile({ url: meta.url, quality: meta.quality || 'best' }, dir);
-      const job = { id, url: meta.url, quality: meta.quality || 'best', status: finished ? 'ready' : 'downloading', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
+      const job = { id, url: meta.url, quality: meta.quality || 'best', status: finished ? 'ready' : 'queued', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
       jobs.set(id, job);
       if (finished) finishJob(job, dir, null);
-      else if (bilibiliId(meta.url) && FFMPEG) runBilibiliJob(job, dir);
-      else runYtDlpJob(job, dir);
     }
   } catch {}
+  pumpQueue();
 }
 recoverJobs();
 function cleanupJob(id) {
   const job = jobs.get(id); if (!job) return;
   jobs.delete(id);
   if (job.file) { try { fs.rmSync(path.dirname(job.file), { recursive: true, force: true }); } catch {} }
+  pumpQueue();
 }
 // Clean up old jobs every hour. Ready files stay 24 hours so the
 // browser queue ("Your downloads") still works on a later visit;
@@ -666,7 +696,7 @@ const server = http.createServer(async (req, res) => {
       const { url, quality } = JSON.parse(await readBody(req) || '{}');
       if (!url || !validUrl(url)) return sendJson(res, 400, { error: 'Paste a valid http(s) video link.' });
       const job = startJob(url, quality || 'best');
-      sendJson(res, 200, { jobId: job.id, status: job.status });
+      sendJson(res, 200, { jobId: job.id, status: job.status, queuePosition: job.status === 'queued' ? queuePositionOf(job) : 0 });
       return;
     }
     if (req.method === 'GET' && u.pathname.startsWith('/api/jobs/')) {
@@ -691,7 +721,7 @@ const server = http.createServer(async (req, res) => {
         stream.on('close', () => {});
         return;
       }
-      sendJson(res, 200, { jobId: job.id, status: job.status, progress: job.progress, error: job.error, size: job.size, name: job.name });
+      sendJson(res, 200, { jobId: job.id, status: job.status, progress: job.progress, error: job.error, size: job.size, name: job.name, queuePosition: job.status === 'queued' ? queuePositionOf(job) : 0 });
       return;
     }
     // Cancel a download: stop the running yt-dlp/ffmpeg and delete its files.
@@ -704,6 +734,7 @@ const server = http.createServer(async (req, res) => {
       const dir = path.join(jobsDir, job.id);
       jobs.delete(job.id);
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      pumpQueue();
       sendJson(res, 200, { ok: true, status: 'cancelled' });
       return;
     }

@@ -29,7 +29,15 @@
     '.sd-cancel{display:inline-block;margin:5px;padding:10px 18px;cursor:pointer;border:2px solid #dc3545;border-radius:8px;background:#fff;color:#b02a37;font-size:14px;font-weight:700}' +
     '.faq_item_title{cursor:pointer}' +
     '.sd-dl{display:inline-block;margin-top:10px;padding:13px 26px;background:#84bd07;color:#fff!important;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;max-width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:anywhere;word-break:break-word;text-align:center;line-height:1.4}' +
-    '@media (max-width:600px){.sd-card{padding:16px 12px;margin:14px auto}.sd-card h3{font-size:17px}.sd-card img{max-width:100%}.sd-q,.sd-mp3{padding:10px 13px;font-size:14px;margin:4px 3px}.sd-status{flex-wrap:wrap;justify-content:center;text-align:center}.sd-error{padding:14px}.sd-dl{padding:12px 16px;font-size:15px}}';
+    '@media (max-width:600px){.sd-card{padding:16px 12px;margin:14px auto}.sd-card h3{font-size:17px}.sd-card img{max-width:100%}.sd-q,.sd-mp3{padding:10px 13px;font-size:14px;margin:4px 3px}.sd-status{flex-wrap:wrap;justify-content:center;text-align:center}.sd-error{padding:14px}.sd-dl{padding:12px 16px;font-size:15px}}' +
+    '.sd-cookie{position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;justify-content:center;padding:12px;box-sizing:border-box;pointer-events:none}' +
+    '.sd-cookie-in{pointer-events:auto;max-width:960px;width:100%;background:#fff;border:1px solid #e3e8e3;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.14);padding:14px 18px;display:flex;align-items:center;gap:14px;box-sizing:border-box}' +
+    '.sd-cookie-t{flex:1;font-size:14px;line-height:1.5;color:#444;text-align:left}' +
+    '.sd-cookie-t b{color:#222}' +
+    '.sd-cookie-a{flex:0 0 auto;display:flex;gap:8px;align-items:center}' +
+    '.sd-cookie-ok{border:0;background:#84bd07;color:#fff;font-weight:700;font-size:14px;padding:10px 20px;border-radius:8px;cursor:pointer}' +
+    '.sd-cookie-no{border:2px solid #e3e3e3;background:#fff;color:#555;font-weight:700;font-size:14px;padding:8px 16px;border-radius:8px;cursor:pointer}' +
+    '@media (max-width:600px){.sd-cookie{padding:8px}.sd-cookie-in{flex-wrap:wrap;gap:10px;padding:12px 14px}.sd-cookie-t{font-size:13px;flex:1 1 100%}.sd-cookie-a{flex:1 1 100%;justify-content:flex-end}}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
   // ---- Your downloads, kept in this browser (localStorage) ----
@@ -73,8 +81,10 @@
     if (!row) return;
     var stEl = row.querySelector('.sd-qstatus'), actEl = row.querySelector('.sd-qact');
     try {
-      var pr = await fetch('/api/jobs/' + e.jobId);
-      if (pr.status === 404) { stEl.textContent = 'Expired - start it again from the link above'; actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>'; return; }
+      var pr = await fetch('/api/jobs/' + e.jobId, { cache: 'no-store' });
+      // A 404 can be a stale cached answer right after the job was
+      // recreated (same id), or a short server hiccup: retry like any
+      // other failure instead of declaring it expired at once.
       if (!pr.ok) throw new Error('gone');
       var j = await pr.json();
       if (j.status === 'ready') {
@@ -86,6 +96,10 @@
       } else if (j.status === 'cancelled') {
         stEl.textContent = 'Cancelled';
         actEl.innerHTML = '<button type="button" class="sd-mp3" style="padding:9px 14px;font-size:14px" data-retry="' + esc(e.jobId) + '">Download again</button>';
+      } else if (j.status === 'queued') {
+        stEl.innerHTML = '<span class="sd-spin" style="display:inline-block;vertical-align:-7px;width:18px;height:18px;min-width:18px"></span> Queued - #' + (j.queuePosition || 1) + ' in line';
+        actEl.innerHTML = '<button type="button" class="sd-cancel" style="padding:9px 14px" data-cancel="' + esc(e.jobId) + '">Cancel</button>';
+        setTimeout(function () { pollQueueEntry(e, 0); }, 3000);
       } else {
         stEl.innerHTML = '<span class="sd-spin" style="display:inline-block;vertical-align:-7px;width:18px;height:18px;min-width:18px"></span> Downloading... ' + (j.progress || 0) + '%';
         actEl.innerHTML = '<button type="button" class="sd-cancel" style="padding:9px 14px" data-cancel="' + esc(e.jobId) + '">Cancel</button>';
@@ -245,12 +259,23 @@
           if (!jr.ok) throw new Error(job.error || 'Download failed to start.');
           addToQueue({ jobId: job.jobId, url: url, title: info.title || 'Video', thumbnail: info.thumbnail || '', quality: b.getAttribute('data-q'), createdAt: Date.now() });
         } catch (err) { errorBox(err.message); return; }
+        var fails = 0;
         timers[job.jobId] = setInterval(async function () {
           try {
-            var pr = await fetch('/api/jobs/' + job.jobId);
-            if (!pr.ok) { stopPoll(job.jobId); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
+            var pr = await fetch('/api/jobs/' + job.jobId, { cache: 'no-store' });
+            if (!pr.ok) {
+              // One bad poll must not kill the download: the server keeps
+              // it running. A 404 right after a recreate can also be a
+              // stale cached answer, so retry that too and only give up
+              // after several misses in a row.
+              fails++;
+              if (pr.status === 404 && fails >= 5) { stopPoll(job.jobId); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
+              stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Connection lost, retrying... your download will continue.</span></div>';
+              return;
+            }
             var j = await pr.json();
-            if (!j.status) { stopPoll(job.jobId); errorBox('Download was interrupted. Please click the quality button again, it will resume from where it stopped.'); return; }
+            if (!j.status) { fails++; stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Connection lost, retrying... your download will continue.</span></div>'; return; }
+            fails = 0;
             if (j.status === 'ready') {
               stopPoll(job.jobId);
               var mb = Math.round((j.size || 0) / 1048576 * 10) / 10;
@@ -263,6 +288,8 @@
             } else if (j.status === 'cancelled') {
               stopPoll(job.jobId);
               stEl.innerHTML = '<div class="sd-status">Download cancelled.</div>';
+            } else if (j.status === 'queued') {
+              stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Waiting in line... you are number ' + (j.queuePosition || 1) + ' in the queue. Your download will start automatically, please wait.</span><button type="button" class="sd-cancel" data-cancel="' + esc(job.jobId) + '">Cancel</button></div>';
             } else {
               stEl.innerHTML = '<div class="sd-status"><span class="sd-spin"></span><span>Preparing your download... ' + (j.progress || 0) + '%</span><button type="button" class="sd-cancel" data-cancel="' + esc(job.jobId) + '">Cancel</button></div>';
             }
@@ -275,6 +302,19 @@
       });
     });
   });
+
+  // Cookie consent: a small bottom banner, only for new visitors.
+  // It never blocks the page and remembers the choice in this browser.
+  try {
+    if (!localStorage.getItem('vidsnap_consent')) {
+      var cb = document.createElement('div');
+      cb.className = 'sd-cookie';
+      cb.innerHTML = '<div class="sd-cookie-in"><div class="sd-cookie-t"><b>Your privacy matters.</b> VidSnap uses cookies and local storage only to remember your downloads and keep the site working smoothly. No tracking, no ads.</div><div class="sd-cookie-a"><button type="button" class="sd-cookie-no">Decline</button><button type="button" class="sd-cookie-ok">Accept</button></div></div>';
+      document.body.appendChild(cb);
+      cb.querySelector('.sd-cookie-ok').addEventListener('click', function () { try { localStorage.setItem('vidsnap_consent', 'accepted'); } catch (e) {} cb.remove(); });
+      cb.querySelector('.sd-cookie-no').addEventListener('click', function () { try { localStorage.setItem('vidsnap_consent', 'declined'); } catch (e) {} cb.remove(); });
+    }
+  } catch (e) {}
 })();
 
 // Clicking any platform icon focuses the link box so you can paste its link.
