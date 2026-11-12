@@ -41,7 +41,15 @@ for (const f of [localYtDlp, path.join(root, 'yt-dlp.bin')]) { try { if (fs.exis
 // installed on Hostinger at ~/bin/ffmpeg (no login, no API needed).
 // It is used for merging AND for direct .mp4/.m3u8 links, which need
 // no yt-dlp, no cookies, and no login at all.
-const FFMPEG_CANDIDATES = [process.env.FFMPEG, path.join(root, 'ffmpeg'), path.join(os.homedir(), 'bin', 'ffmpeg'), '/usr/bin/ffmpeg', 'ffmpeg'];
+// Under lsnode/Passenger, HOME (and os.homedir()) is the site's
+// public_html dir, NOT the user home — so ~/.cookies/youtube.txt and
+// ~/bin/ffmpeg were never found and YouTube fell back to the android
+// client with no cookies ("Sign in to confirm you're not a bot").
+// The app lives at <home>/domains/<domain>/public_html/downsub, so
+// the real user home is four levels above the app root. Candidates
+// are all checked for existence, so a wrong guess is just skipped.
+const REAL_HOME = path.resolve(root, '..', '..', '..', '..');
+const FFMPEG_CANDIDATES = [process.env.FFMPEG, path.join(root, 'ffmpeg'), path.join(REAL_HOME, 'bin', 'ffmpeg'), path.join(os.homedir(), 'bin', 'ffmpeg'), '/usr/bin/ffmpeg', 'ffmpeg'];
 const FFMPEG = FFMPEG_CANDIDATES.find(p => { try { return p && spawnSync(p, ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; } }) || null;
 const HAS_FFMPEG = !!FFMPEG;
 // YouTube cookies (optional, for bot-check): set COOKIES_FILE in the
@@ -52,6 +60,7 @@ const HAS_FFMPEG = !!FFMPEG;
 const COOKIES_CANDIDATES = [
   process.env.COOKIES_FILE,
   path.join(root, 'cookies.txt'),
+  path.join(REAL_HOME, '.cookies', 'youtube.txt'),
   path.join(os.homedir(), '.cookies', 'youtube.txt'),
 ];
 const COOKIES_FILE = COOKIES_CANDIDATES.find(p => p && fs.existsSync(p)) || null;
@@ -70,7 +79,7 @@ const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 const PLAYER_CLIENT = COOKIES_FILE ? 'web' : 'android';
 const BASE_ARGS = ['--force-ipv4', '--js-runtimes', 'deno', '--extractor-args', `youtube:player_client=${PLAYER_CLIENT}`, ...(COOKIES_FILE ? ['--cookies', COOKIES_FILE] : []), ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : [])];
 // Extra PATH for yt-dlp to find deno/node/ffmpeg on shared hosting.
-const CHILD_PATH = [path.join(os.homedir(), 'bin'), '/opt/alt/alt-nodejs20/root/usr/bin', process.env.PATH].filter(Boolean).join(':');
+const CHILD_PATH = [path.join(REAL_HOME, 'bin'), path.join(os.homedir(), 'bin'), '/opt/alt/alt-nodejs20/root/usr/bin', process.env.PATH].filter(Boolean).join(':');
 const CHILD_ENV = { ...process.env, PATH: CHILD_PATH };
 
 function detectPlatform(url) {
