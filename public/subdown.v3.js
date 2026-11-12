@@ -152,7 +152,7 @@
     }).join('');
     show(
       '<div class="sd-card">' +
-      (info.thumbnail ? '<img src="' + esc(info.thumbnail) + '" alt="">' : '') +
+      (info.thumbnail ? '<img src="' + esc(info.thumbnail) + '" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">' : '') +
       '<h3>' + esc(info.title || 'Video') + '</h3>' +
       '<p class="sd-meta">' + esc(info.platform || '') + (info.duration ? ' &bull; ' + Math.round(info.duration / 60) + ' min' : '') + '</p>' +
       '<p style="font-weight:700;margin:0 0 6px">Choose quality:</p><div>' + (btns || '<button type="button" class="sd-q" data-q="best">Download</button>') + '</div>' +
