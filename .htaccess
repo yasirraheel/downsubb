@@ -1,0 +1,10 @@
+Options -Indexes
+PassengerEnabled on
+PassengerAppRoot /home/u181781564/domains/hassanagro.com/public_html/downsub
+PassengerBaseURI /
+PassengerAppType node
+PassengerStartupFile app.cjs
+PassengerNodejs /opt/alt/alt-nodejs20/root/usr/bin/node
+<FilesMatch "^(\.|package.*\.json$|.*\.(cjs|js|mjs|sh|md|log|zip|tar|gz|txt)$|yt-dlp.*)">
+  Require all denied
+</FilesMatch>

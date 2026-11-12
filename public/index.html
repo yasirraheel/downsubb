@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubDown — Download any public video</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e2e8f0}
+  .wrap{max-width:760px;margin:0 auto;padding:48px 20px}
+  h1{font-size:34px;margin:0 0 6px} h1 span{color:#22c55e}
+  p.sub{color:#94a3b8;margin:0 0 28px}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:20px}
+  .row{display:flex;gap:10px} input{flex:1;padding:14px;border-radius:10px;border:1px solid #475569;background:#0f172a;color:#fff;font-size:16px;min-width:0}
+  button{padding:14px 20px;border:0;border-radius:10px;background:#22c55e;color:#052e16;font-weight:700;font-size:16px;cursor:pointer}
+  button:disabled{opacity:.5;cursor:wait}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .chip{background:#0f172a;border:1px solid #334155;color:#cbd5e1;border-radius:999px;padding:6px 12px;font-size:13px}
+  #result{margin-top:20px;display:none}
+  #result img{width:100%;border-radius:12px}
+  .meta{margin:12px 0;color:#cbd5e1} .meta b{color:#fff}
+  .quals{display:flex;flex-wrap:wrap;gap:8px}
+  .quals button{background:#334155;color:#fff}
+  .quals button.active{background:#22c55e;color:#052e16}
+  #status{margin-top:14px;color:#fbbf24;min-height:20px}
+  .note{margin-top:28px;color:#94a3b8;font-size:14px;line-height:1.6}
+  .note b{color:#e2e8f0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SubDown<span>.</span></h1>
+  <p class="sub">Ek hi interface. Kisi bhi public video ka link paste karo — server pehle download karega, phir file aap tak aayegi.</p>
+  <div class="card">
+    <div class="row">
+      <input id="url" type="url" placeholder="Paste video link — YouTube, TikTok, Instagram, Facebook, X, Vimeo…" autocomplete="off">
+      <button id="fetchBtn">Fetch</button>
+    </div>
+    <div class="chips">
+      <span class="chip">YouTube</span><span class="chip">TikTok</span><span class="chip">Instagram</span>
+      <span class="chip">Facebook</span><span class="chip">X</span><span class="chip">Vimeo</span>
+      <span class="chip">Dailymotion</span><span class="chip">Reddit</span><span class="chip">+ more</span>
+    </div>
+    <div id="result">
+      <img id="thumb" alt="">
+      <div class="meta"><b id="title"></b><br><span id="details"></span></div>
+      <div class="quals" id="quals"></div>
+      <div style="margin-top:14px"><button id="dlBtn">Download</button></div>
+    </div>
+    <div id="status"></div>
+  </div>
+  <div class="note">
+    <b>Kaise kaam karta hai:</b> link server par jata hai, video pehle server par download hoti hai, phir aap ko milti hai aur server se delete ho jati hai. Is liye agar video aap ke country mein blocked hai lekin server ke country mein available hai, to download ho sakta hai.<br><br>
+    <b>Limit:</b> sirf public videos. Private, login-only, ya age-restricted videos download nahi hongi. Agar video server ke country mein bhi blocked hai, to wo bhi nahi hogi. Sirf apni ya ijazat wali videos download karein, copyright ka khayal rakhein.
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let currentUrl = '', quality = 'best';
+$('fetchBtn').onclick = async () => {
+  const url = $('url').value.trim();
+  if (!url) return $('status').textContent = 'Pehle link paste karein.';
+  $('fetchBtn').disabled = true; $('status').textContent = 'Video ki info server se li ja rahi hai…';
+  $('result').style.display = 'none';
+  try {
+    const r = await fetch('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Fetch failed');
+    currentUrl = url; quality = 'best';
+    $('thumb').src = j.thumbnail || '';
+    $('title').textContent = j.title || 'Video';
+    $('details').textContent = `${j.platform || ''} · ${j.uploader || ''} · ${j.duration ? Math.floor(j.duration/60) + ':' + String(j.duration%60).padStart(2,'0') : ''}`;
+    const q = $('quals'); q.innerHTML = '';
+    const opts = [{label:'Best quality', v:'best'}].concat((j.formats||[]).map(f=>({label:f.label, v:String(f.height)}))).concat([{label:'Audio MP3', v:'audio'}]);
+    opts.forEach((o,i)=>{ const b=document.createElement('button'); b.textContent=o.label; if(i===0)b.classList.add('active');
+      b.onclick=()=>{ quality=o.v; q.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); };
+      q.appendChild(b); });
+    $('result').style.display = 'block';
+    $('status').textContent = 'Ready — quality choose karein aur Download dabayein.';
+  } catch(e){ $('status').textContent = e.message; }
+  $('fetchBtn').disabled = false;
+};
+$('dlBtn').onclick = async () => {
+  if (!currentUrl) return;
+  $('dlBtn').disabled = true;
+  $('status').textContent = 'Server par download start ho gaya hai — ye background mein chalega, aap page par hi rahein.';
+  try {
+    const r = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, quality }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Job start failed');
+    const poll = setInterval(async () => {
+      try {
+        const s = await (await fetch('/api/jobs/' + j.jobId)).json();
+        if (s.status === 'downloading') { $('status').textContent = `Server par download ho raha hai… ${s.progress || 0}%`; return; }
+        clearInterval(poll); $('dlBtn').disabled = false;
+        if (s.status === 'ready') { $('status').textContent = 'Ready — file aap tak bheji ja rahi hai.'; window.location = '/api/jobs/' + j.jobId + '/file'; }
+        else $('status').textContent = s.error || 'Download fail ho gaya.';
+      } catch (e) { clearInterval(poll); $('dlBtn').disabled = false; $('status').textContent = e.message; }
+    }, 2000);
+  } catch (e) { $('dlBtn').disabled = false; $('status').textContent = e.message; }
+};
+$('url').addEventListener('keydown', e => { if (e.key === 'Enter') $('fetchBtn').click(); });
+</script>
+</body>
+</html>

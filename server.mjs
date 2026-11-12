@@ -1,0 +1,284 @@
+// SubDown — OUR OWN backend. The uploaded zip is ONLY a template.
+// No SaveFrom backend, no SaveFrom API URLs, no third-party downloader
+// API is used anywhere in this project. The only fetcher is yt-dlp
+// running on OUR server, plus ffmpeg for merging when available.
+// Flow (Hostinger-safe, job-based): user pastes a link ->
+// POST /api/info (yt-dlp --dump-json) -> user picks quality ->
+// POST /api/jobs starts the download in the BACKGROUND and returns a
+// job id immediately, so Hostinger's 120-second request limit never
+// kills a long download. Frontend polls GET /api/jobs/:id, and when
+// ready GET /api/jobs/:id/file streams the file to the user, then the
+// server deletes it.
+// That server-first step is what lets a video blocked in the user's
+// country still work, as long as it is available in the server's country.
+// It does NOT bypass a block in the server's country too, or a private,
+// login-only, or age-gated video.
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const root = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.join(root, 'public');
+// Job files live in the app folder by default so it works on shared
+// hosting where /tmp may be restricted. Override with JOBS_DIR.
+const jobsDir = process.env.JOBS_DIR || path.join(root, '.jobs');
+fs.mkdirSync(jobsDir, { recursive: true });
+
+const PORT = Number(process.env.PORT || 4175);
+const HOST = process.env.HOST || '0.0.0.0';
+// yt-dlp binary: env override, else bundled standalone ./yt-dlp, else PATH
+const localYtDlp = path.join(root, 'yt-dlp');
+const YTDLP = process.env.YTDLP || (fs.existsSync(localYtDlp) ? localYtDlp : 'yt-dlp');
+// ffmpeg: check env, ~/bin, then PATH. Static ffmpeg 7.0.2 was
+// installed on Hostinger at ~/bin/ffmpeg (no login, no API needed).
+// It is used for merging AND for direct .mp4/.m3u8 links, which need
+// no yt-dlp, no cookies, and no login at all.
+const FFMPEG_CANDIDATES = [process.env.FFMPEG, path.join(os.homedir(), 'bin', 'ffmpeg'), '/usr/bin/ffmpeg', 'ffmpeg'];
+const FFMPEG = FFMPEG_CANDIDATES.find(p => { try { return p && spawnSync(p, ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; } }) || null;
+const HAS_FFMPEG = !!FFMPEG;
+// YouTube cookies (optional, for bot-check): set COOKIES_FILE in the
+// environment, or put a cookies.txt next to server.mjs. The file must
+// live OUTSIDE public_html so it is never web-accessible, and must
+// never be committed or put in a deploy zip. It is only used by yt-dlp
+// to prove to YouTube that the request comes from a logged-in account.
+const COOKIES_CANDIDATES = [
+  process.env.COOKIES_FILE,
+  path.join(root, 'cookies.txt'),
+  path.join(os.homedir(), '.cookies', 'youtube.txt'),
+];
+const COOKIES_FILE = COOKIES_CANDIDATES.find(p => p && fs.existsSync(p)) || null;
+console.log(`SubDown starting: yt-dlp=${YTDLP} ffmpeg=${FFMPEG || 'none'} cookies=${COOKIES_FILE ? 'loaded' : 'none'}`);
+
+const MAX_BYTES = Number(process.env.MAX_BYTES || 2 * 1024 * 1024 * 1024); // 2 GB
+const MAX_DURATION = Number(process.env.MAX_DURATION || 3 * 60 * 60); // 3 hours
+
+const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+// Own-backend args, applied to every yt-dlp call. No API, no login
+// is required for the server itself: yt-dlp + Deno (JS challenge
+// solver, ~/bin/deno on Hostinger) + ffmpeg are all self-contained.
+// The android player client is what got YouTube working from a clean
+// server IP; the web client is used when cookies are present, because
+// android does not support cookies.
+const PLAYER_CLIENT = COOKIES_FILE ? 'web' : 'android';
+const BASE_ARGS = ['--force-ipv4', '--js-runtimes', 'deno', '--extractor-args', `youtube:player_client=${PLAYER_CLIENT}`, ...(COOKIES_FILE ? ['--cookies', COOKIES_FILE] : [])];
+// Extra PATH for yt-dlp to find deno/node/ffmpeg on shared hosting.
+const CHILD_PATH = [path.join(os.homedir(), 'bin'), '/opt/alt/alt-nodejs20/root/usr/bin', process.env.PATH].filter(Boolean).join(':');
+const CHILD_ENV = { ...process.env, PATH: CHILD_PATH };
+
+function detectPlatform(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    if (h.includes('youtube') || h === 'youtu.be') return 'YouTube';
+    if (h.includes('tiktok')) return 'TikTok';
+    if (h.includes('instagram')) return 'Instagram';
+    if (h.includes('facebook') || h === 'fb.watch') return 'Facebook';
+    if (h.includes('twitter') || h === 'x.com') return 'X / Twitter';
+    if (h.includes('vimeo')) return 'Vimeo';
+    if (h.includes('dailymotion')) return 'Dailymotion';
+    if (h.includes('reddit')) return 'Reddit';
+    if (h.includes('pinterest')) return 'Pinterest';
+    if (h.includes('twitch')) return 'Twitch';
+    return h;
+  } catch { return 'Unknown'; }
+}
+function validUrl(s) { try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; } }
+
+function runYtDlp(args, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(YTDLP, [...BASE_ARGS, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+    let out = '', err = '';
+    const t = setTimeout(() => { p.kill('SIGKILL'); reject(new Error('Timed out while talking to the video site. Try again.')); }, timeoutMs);
+    p.stdout.on('data', d => { out += d; if (out.length > 5_000_000) p.kill(); });
+    p.stderr.on('data', d => { err += d; });
+    p.on('error', e => { clearTimeout(t); reject(new Error(`yt-dlp not found at ${YTDLP}. (${e.message})`)); });
+    p.on('close', code => { clearTimeout(t); if (code === 0) resolve(out); else reject(new Error(friendlyError(err || out || `yt-dlp exited with code ${code}`))); });
+  });
+}
+function friendlyError(raw) {
+  const s = raw.toLowerCase();
+  if (s.includes('not available in your country') || s.includes('blocked in your country')) return 'This video is not available in the server country either. A server in an allowed country is needed for this link.';
+  if (s.includes('private video') || s.includes('login required') || s.includes('sign in')) return 'This video is private or needs a login. Server-side download cannot open it without an account.';
+  if (s.includes('age')) return 'This video is age-restricted and needs a logged-in account.';
+  if (s.includes('unsupported url') || s.includes('no video formats')) return 'This link is not a supported public video link, or the video has no downloadable formats.';
+  if (s.includes('video unavailable') || s.includes('removed') || s.includes('deleted')) return 'This video is unavailable, removed, or deleted.';
+  return raw.split('\n').filter(l => l.trim()).slice(-3).join(' ').slice(0, 300) || 'Could not download this video.';
+}
+function sendJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); }
+function readBody(req) { return new Promise((resolve, reject) => { let b = ''; req.on('data', d => { b += d; if (b.length > 10000) req.destroy(); }); req.on('end', () => resolve(b)); req.on('error', reject); }); }
+function safeName(s) { return (s || 'video').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'video'; }
+
+function downloadArgs(url, quality, outTpl) {
+  if (quality === 'audio') {
+    return HAS_FFMPEG
+      ? ['--no-playlist', '-f', 'ba', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '-o', outTpl, url]
+      : ['--no-playlist', '-f', 'ba/b', '-o', outTpl, url];
+  }
+  if (HAS_FFMPEG) {
+    const f = quality === 'best' ? 'bv*[height<=1080]+ba/b[height<=1080]' : `bv*[height<=${parseInt(quality, 10) || 720}]+ba/b[height<=${parseInt(quality, 10) || 720}]`;
+    return ['--no-playlist', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
+  }
+  // No ffmpeg: single pre-merged file only, up to 720p.
+  const f = quality === 'best' ? 'best[height<=720]/18/b[height<=720]' : `best[height<=${parseInt(quality, 10) || 720}]/b[height<=${parseInt(quality, 10) || 720}]`;
+  return ['--no-playlist', '-f', f, '-o', outTpl, url];
+}
+
+// Direct media link (.mp4/.webm/.m3u8/.mp3 …): ffmpeg downloads it
+// directly — no yt-dlp, no cookies, no login, no API at all.
+function isDirectMedia(url) {
+  try { const p = new URL(url).pathname.toLowerCase(); return /\.(mp4|webm|mov|mkv|m3u8|mp3|m4a|wav|avi)$/.test(p); } catch { return false; }
+}
+function finishJob(job, jobDir, errText) {
+  if (job.status === 'error') return;
+  if (errText) { job.status = 'error'; job.error = friendlyError(errText); return; }
+  try {
+    const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile());
+    if (!files.length) { job.status = 'error'; job.error = 'Download finished on the server but no file was created.'; return; }
+    const file = path.join(jobDir, files[0]);
+    job.size = fs.statSync(file).size;
+    if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; return; }
+    job.file = file;
+    job.name = `${safeName(path.basename(file, path.extname(file)))}.${path.extname(file).slice(1) || 'mp4'}`;
+    job.status = 'ready'; job.progress = 100;
+  } catch (e) { job.status = 'error'; job.error = e.message; }
+}
+
+// ---- background jobs ----
+const jobs = new Map(); // id -> {id, url, quality, status, progress, error, file, size, name, createdAt}
+function startJob(url, quality) {
+  const id = crypto.randomBytes(8).toString('hex');
+  const jobDir = path.join(jobsDir, id);
+  fs.mkdirSync(jobDir, { recursive: true });
+  const job = { id, url, quality, status: 'downloading', progress: 0, error: null, file: null, size: 0, name: null, createdAt: Date.now() };
+  jobs.set(id, job);
+  // Direct media: ffmpeg trick, no login/API.
+  if (isDirectMedia(url) && FFMPEG) {
+    const ext = new URL(url).pathname.split('.').pop().toLowerCase().split('?')[0] || 'mp4';
+    const outFile = path.join(jobDir, `video.${ext === 'm3u8' ? 'mp4' : ext}`);
+    const args = ['-y', '-user_agent', 'Mozilla/5.0', '-i', url, '-c', 'copy', outFile];
+    const p = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+    let err = '';
+    p.stderr.on('data', d => { err += d; const m = err.match(/time=(\d+):(\d+):(\d+)/g); if (m) job.progress = 50; });
+    p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+    p.on('close', code => { if (code !== 0) finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); else finishJob(job, jobDir, null); });
+    return job;
+  }
+  const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
+  const p = spawn(YTDLP, [...BASE_ARGS, ...downloadArgs(url, quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+  let err = '';
+  p.stderr.on('data', d => {
+    err += d;
+    const m = err.match(/\[download\]\s+(\d+(?:\.\d+)?)%/g);
+    if (m) { const last = m[m.length - 1].match(/(\d+(?:\.\d+)?)%/); if (last) job.progress = Math.round(parseFloat(last[1])); }
+  });
+  p.on('error', e => { job.status = 'error'; job.error = `yt-dlp not found at ${YTDLP}. (${e.message})`; });
+  p.on('close', code => {
+    if (job.status === 'error') return;
+    if (code !== 0) { job.status = 'error'; job.error = friendlyError(err || `yt-dlp exited with code ${code}`); return; }
+    finishJob(job, jobDir, null);
+  });
+  return job;
+}
+function cleanupJob(id) {
+  const job = jobs.get(id); if (!job) return;
+  jobs.delete(id);
+  if (job.file) { try { fs.rmSync(path.dirname(job.file), { recursive: true, force: true }); } catch {} }
+}
+// Clean up jobs older than 1 hour, every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, job] of jobs) if (now - job.createdAt > 60 * 60 * 1000) cleanupJob(id);
+}, 60 * 60 * 1000);
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const u = new URL(req.url, `http://${req.headers.host}`);
+    if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
+      res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
+    }
+    if (req.method === 'GET' && u.pathname.startsWith('/public/')) {
+      const f = path.resolve(publicDir, u.pathname.slice(8));
+      if (!f.startsWith(publicDir)) return res.writeHead(403).end();
+      if (!fs.existsSync(f)) return res.writeHead(404).end('Not found');
+      res.writeHead(200, { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res); return;
+    }
+    if (req.method === 'POST' && u.pathname === '/api/info') {
+      const { url } = JSON.parse(await readBody(req) || '{}');
+      if (!url || !validUrl(url)) return sendJson(res, 400, { error: 'Paste a valid http(s) video link.' });
+      if (isDirectMedia(url)) {
+        const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'video');
+        return sendJson(res, 200, { title: name, uploader: '', duration: 0, thumbnail: '', platform: 'Direct file', formats: [{ label: 'Original', height: 720 }], hasAudio: true, ffmpeg: HAS_FFMPEG });
+      }
+      const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url]);
+      const j = JSON.parse(out);
+      if (j.duration && j.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(j.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
+      const formats = []; const seen = new Set();
+      for (const f of (j.formats || [])) {
+        if (!f.height || f.height < 144 || !f.ext || !['mp4', 'webm'].includes(f.ext) || f.vcodec === 'none') continue;
+        const key = `${f.height}p`; if (seen.has(key)) continue; seen.add(key);
+        formats.push({ label: `${f.height}p`, height: f.height });
+      }
+      formats.sort((a, b) => b.height - a.height);
+      sendJson(res, 200, { title: j.title, uploader: j.uploader || j.channel || '', duration: j.duration || 0, thumbnail: j.thumbnail || '', platform: detectPlatform(url), formats: formats.slice(0, 6), hasAudio: true, ffmpeg: HAS_FFMPEG });
+      return;
+    }
+    // Job-based download (Hostinger-safe)
+    if (req.method === 'POST' && u.pathname === '/api/jobs') {
+      const { url, quality } = JSON.parse(await readBody(req) || '{}');
+      if (!url || !validUrl(url)) return sendJson(res, 400, { error: 'Paste a valid http(s) video link.' });
+      const job = startJob(url, quality || 'best');
+      sendJson(res, 200, { jobId: job.id, status: job.status });
+      return;
+    }
+    if (req.method === 'GET' && u.pathname.startsWith('/api/jobs/')) {
+      const parts = u.pathname.split('/').filter(Boolean); // api, jobs, id, [file]
+      const job = jobs.get(parts[2]);
+      if (!job) return sendJson(res, 404, { error: 'Job not found or expired. Start a new download.' });
+      if (parts[3] === 'file') {
+        if (job.status !== 'ready' || !job.file) return sendJson(res, 400, { error: job.status === 'error' ? (job.error || 'Download failed.') : 'File is not ready yet.' });
+        const size = job.size;
+        const range = req.headers.range;
+        if (range) {
+          const m = range.match(/bytes=(\d+)-(\d*)/);
+          const start = m ? parseInt(m[1], 10) : 0;
+          const end = m && m[2] ? parseInt(m[2], 10) : size - 1;
+          res.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Disposition': `attachment; filename="${job.name}"` });
+          fs.createReadStream(job.file, { start, end }).pipe(res);
+          res.on('finish', () => { if (end === size - 1) setTimeout(() => cleanupJob(job.id), 5000); });
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': job.quality === 'audio' && !HAS_FFMPEG ? 'application/octet-stream' : 'video/mp4', 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': `attachment; filename="${job.name}"` });
+        const stream = fs.createReadStream(job.file);
+        stream.pipe(res);
+        stream.on('close', () => setTimeout(() => cleanupJob(job.id), 5000));
+        return;
+      }
+      sendJson(res, 200, { jobId: job.id, status: job.status, progress: job.progress, error: job.error, size: job.size, name: job.name });
+      return;
+    }
+    // Direct download (local / VPS use; may hit Hostinger's 120s limit on big files — prefer /api/jobs)
+    if (req.method === 'GET' && u.pathname === '/api/download') {
+      const url = u.searchParams.get('url') || '';
+      const quality = u.searchParams.get('quality') || 'best';
+      if (!validUrl(url)) return sendJson(res, 400, { error: 'Paste a valid http(s) video link.' });
+      const job = startJob(url, quality);
+      const wait = setInterval(() => {
+        if (job.status === 'ready') {
+          clearInterval(wait);
+          res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': job.size, 'Content-Disposition': `attachment; filename="${job.name}"` });
+          const s = fs.createReadStream(job.file); s.pipe(res); s.on('close', () => setTimeout(() => cleanupJob(job.id), 5000));
+        } else if (job.status === 'error') { clearInterval(wait); if (!res.headersSent) sendJson(res, 500, { error: job.error || 'Download failed.' }); }
+      }, 1000);
+      return;
+    }
+    res.writeHead(404).end('Not found');
+  } catch (e) {
+    console.error(e);
+    if (!res.headersSent) sendJson(res, 500, { error: e.message || 'Server error' });
+  }
+});
+
+server.listen(PORT, HOST, () => console.log(`SubDown live at http://${HOST}:${PORT}/ (ffmpeg: ${HAS_FFMPEG})`));

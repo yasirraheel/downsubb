@@ -1,0 +1,5 @@
+node_modules/
+.jobs/
+cookies.txt
+cookies*.json
+*.log

@@ -1,0 +1,1 @@
+{"description":"SubDown — single-interface video downloader with our own yt-dlp backend","engines":{"node":">=18"},"main":"server.mjs","name":"subdown","private":true,"scripts":{"start":"node server.mjs"},"type":"module","version":"1.0.0"}
