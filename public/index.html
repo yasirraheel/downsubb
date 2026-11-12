@@ -1,104 +1,727 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SubDown — Download any public video</title>
-<style>
-  *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e2e8f0}
-  .wrap{max-width:760px;margin:0 auto;padding:48px 20px}
-  h1{font-size:34px;margin:0 0 6px} h1 span{color:#22c55e}
-  p.sub{color:#94a3b8;margin:0 0 28px}
-  .card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:20px}
-  .row{display:flex;gap:10px} input{flex:1;padding:14px;border-radius:10px;border:1px solid #475569;background:#0f172a;color:#fff;font-size:16px;min-width:0}
-  button{padding:14px 20px;border:0;border-radius:10px;background:#22c55e;color:#052e16;font-weight:700;font-size:16px;cursor:pointer}
-  button:disabled{opacity:.5;cursor:wait}
-  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
-  .chip{background:#0f172a;border:1px solid #334155;color:#cbd5e1;border-radius:999px;padding:6px 12px;font-size:13px}
-  #result{margin-top:20px;display:none}
-  #result img{width:100%;border-radius:12px}
-  .meta{margin:12px 0;color:#cbd5e1} .meta b{color:#fff}
-  .quals{display:flex;flex-wrap:wrap;gap:8px}
-  .quals button{background:#334155;color:#fff}
-  .quals button.active{background:#22c55e;color:#052e16}
-  #status{margin-top:14px;color:#fbbf24;min-height:20px}
-  .note{margin-top:28px;color:#94a3b8;font-size:14px;line-height:1.6}
-  .note b{color:#e2e8f0}
-</style>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <meta name="robots" content="index, follow">
+
+    <title>SubDown — Free Online Video Downloader</title>
+    <meta name="description" content="Download videos from popular platforms with SubDown, the leading free online video downloader. Easily save videos in various formats and resolutions. Start downloading now!">
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="SubDown — Free Online Video Downloader" />
+    <meta property="og:description" content="Download videos from popular platforms with SubDown, the leading free online video downloader. Easily save videos in various formats and resolutions. Start downloading now!" />
+    <meta property="og:image" content="/img/extension/icon_192.png" />
+    <meta property="og:url" content="/" />
+    <meta property="og:locale" content="en" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="SubDown — Free Online Video Downloader" />
+    <meta name="twitter:description" content="Download videos from popular platforms with SubDown, the leading free online video downloader. Easily save videos in various formats and resolutions. Start downloading now!" />
+    <meta name="twitter:image" content="/img/extension/icon_192.png" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=5.0, shrink-to-fit=no" name="viewport">
+
+    
+    <script>
+        document.documentElement.className +=
+            (("ontouchstart" in document.documentElement) ? ' touch' : ' no-touch');
+    </script>
+    <link rel="preload" href="/font/fonts.css" as="style">
+    <link rel="stylesheet" href="/font/fonts.css" media="print" onload="this.media='all'">
+
+    <link rel="stylesheet" href="/build/css/styles.css?h=f4055ff1e6">
+
+
+    <link rel="manifest" href="/manifest.json">
+    <link rel="shortcut icon" href="/img/extension/icon_192.png">
+    <link rel="image_src" href="/img/extension/icon_192.png">
+
+    
+    <link rel="canonical" href="/">
+
 </head>
-<body>
-<div class="wrap">
-  <h1>SubDown<span>.</span></h1>
-  <p class="sub">Ek hi interface. Kisi bhi public video ka link paste karo — server pehle download karega, phir file aap tak aayegi.</p>
-  <div class="card">
-    <div class="row">
-      <input id="url" type="url" placeholder="Paste video link — YouTube, TikTok, Instagram, Facebook, X, Vimeo…" autocomplete="off">
-      <button id="fetchBtn">Fetch</button>
+
+<body class="search-panel__mobile">
+
+    <!--Header-->
+    <header class="header header_v2">
+        <div class="page-width-inner g-row_inline">
+            <div class="header__left g-col">
+                <span class="menu-btn menu-btn_v2"></span>
+                <a href="/" name="logo" class="logo">SubDown</a>
+            </div>
+            <nav id="nav_top" class="g-col c9">
+                <div class="nav-top-2 right">
+                    <a href="/1-youtube-video-downloader-22wW/" class="nav-top-2__item">YouTube</a>
+                    <a href="/9-how-to-download-facebook-video-8GJ.html" class="nav-top-2__item">Facebook</a>
+                    <a href="/15xA/download-from-instagram.html" class="nav-top-2__item">Instagram</a>
+                    <a href="/16Em/download-from-tiktok.html" class="nav-top-2__item">TikTok</a>
+                    <a href="/100-how-to-1QT.html" class="nav-top-2__item">How to</a>
+                    <a href="#offline" class="nav-top-2__item">Install</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <div id="main" class="main-block main-block_v2">
+        <noscript>
+    <div class="wrapper"><p class="javascript-error">SubDown uses Javascript to display some content. Please enable Javascript in your browser and reload this page.</p></div>
+  </noscript>
+        <div class="downloader-block">
+            <div class="open-link-form-all-block open-link-form-old">
+                <div class="main-form-box">
+                    <div class="main-form-box-left">
+                        <div id="link-form-old-cont">
+                            <div class="downloader-2 downloader-2-part1">
+                                <!--main form-->
+                                <form action="#offline" method="POST" class="sf-form link-form" id="sf_form">
+                                    <div class="form-block">
+                                        <div class="l-box">
+                                            <div class="tarea-wrap">
+                                                <input type="text" name="sf_url" value="" autofocus placeholder="Paste your video link here" id="sf_url" onfocus="if(this.value && this.select){this.select()}">
+                                                <a href="#offline" class="clear-btn"></a>
+                                            </div>
+                                        </div>
+                                        <div class="r-box">
+                                            <button type="submit" name="sf_submit" id="sf_submit" class="submit" aria-label="Search"></button>
+                                        </div>
+                                    </div>
+                                    <div class="services clearfix"></div>
+                                    <input type="hidden" name="new" value="2">
+                                    <input type="hidden" name="lang" value="en">
+                                    <input type="hidden" name="app" value="">
+                                    <div class="terms__string">By using our service you accept our <a href="#offline" rel="nofollow">Terms of Service</a> and <a href="#offline" rel="nofollow" target="_blank">Privacy Policy</a></div>
+                                </form>
+                                <!--/main form-->
+
+                                <iframe name="sf_frame" id="sf_frame" width="100" height="150" style="display: none;"></iframe>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="main-form-box-right" style="display:none"></div>
+                </div>
+            </div>
+
+
+            <div class="downloader-2 downloader-2-part2">
+                <div id="sf_indicator_box" style="display: none;"></div>
+
+                <div id="sf_multi_form_box"></div>
+                <div id="sf_multi_result"></div>
+                <!--result-->
+                <div id="sf_result">
+
+                </div>
+                <!--/result-->
+
+            </div>
+            <div class="norton">
+                <p>Scanned by</p>
+                <img alt="Norton" src="/img/norton.svg" width="22" height="22">
+                <p>Norton<sup>TM</sup> Safe Web</p>
+            </div>
+            <div id="modal-container" class="modal-container center-popup-cont">
+                <div class="shade"></div>
+                <div class="popup-content">
+                    <div class="modal-text-cont-for-js"></div>
+                    <div class="close-modal close-modal-icon"></div>
+                </div>
+            </div>
+
+            <div id="output-dialog" class="a11y-dialog" aria-hidden="true">
+                <div class="a11y-dialog-overlay" data-a11y-dialog-hide></div>
+                <div role="document" class="a11y-dialog-content">
+                    <button type="button" class="a11y-dialog-close" data-a11y-dialog-hide>&times;</button>
+                    <div class="a11y-dialog-content-for-js"></div>
+                </div>
+            </div>
+
+
+
+
+        </div>
+
+
+
+        <!--    </div>/wrapper-->
+        <div class="install-now" id="js-install-now"></div>
+        <div class="wrapper wrapper-after-output">
+            <script type="application/ld+json">
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Article",
+                    "mainEntityOfPage": {
+                        "@type": "WebPage",
+                        "@id": "//19wr/"
+                    },
+                    "headline": "SubDown — Free Online Video Downloader",
+                    "description": "Download videos from popular platforms with SubDown, the leading free online video downloader. Easily save videos in various formats and resolutions. Start downloading now!",
+                    "image": "//img/logo_small2.svg",
+                    "author": {
+                        "@type": "Organization",
+                        "name": "SubDown"
+                    },
+                    "publisher": {
+                        "@type": "Organization",
+                        "name": "SubDown",
+                        "logo": {
+                            "@type": "ImageObject",
+                            "url": "//img/logo_small2.svg"
+                        }
+                    },
+                    "datePublished": "2024-01-05T00:00:00+00:00",
+                    "dateModified": "2026-10-29T13:09:49+00:00",
+                    "inLanguage": "en"
+                }
+            </script>
+                <div class="ox7-content"></div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:center;gap:4px;font-size:14px;color:#555;margin:8px 0 14px;line-height:1.4;flex-wrap:wrap;">
+                <span style="color:#f5a623;font-size:16px;letter-spacing:1px;" aria-hidden="true">★★★★★</span>
+                <strong style="color:#333;font-weight:700;">4.8</strong><span style="color:#999;">/5</span>
+                <span style="color:#ccc;">&nbsp;·&nbsp;</span>
+                <span style="color:#777;">55,424&nbsp;reviews</span>
+            </div>
+            <div class="site-info-tabs">
+                <div>
+
+                    <nav class="main-supported-services">
+                        <ul class="supported-services_v3 supported-services important-services">
+                            <li class="service-facebook_com"><a href="#offline" class="main-favicon icon-facebook_com">facebook.com</a></li>
+                            <li class="service-instagram_com"><a href="#offline" class="main-favicon icon-instagram_com">instagram.com</a></li>
+                            <li class="service-youtube_com"><a href="#offline" class="main-favicon icon-youtube_com">youtube.com</a></li>
+                            <li class="service-tiktok_com"><a href="#offline" class="main-favicon icon-tiktok_com">tiktok.com</a></li>
+                        </ul>
+                        <div class="other-services">
+                            <p class="supported-services-header">All resources</p>
+                            <ul class="supported-services_v3 supported-services other-services">
+                                <li class="service-dailymotion_com"><a href="#offline" class="main-favicon icon-dailymotion_com">dailymotion.com</a></li>
+                                <li class="service-vimeo_com"><a href="#offline" class="main-favicon icon-vimeo_com">vimeo.com</a></li>
+                                <li class="service-vk_com"><a href="#offline" class="main-favicon icon-vk_com">vk.com</a></li>
+                                <li class="service-tiktok_com"><a href="#offline" class="main-favicon icon-tiktok_com">tiktok.com</a></li>
+                                <li class="service-reddit_com"><a href="#offline" class="main-favicon icon-reddit_com">reddit.com</a></li>
+                                <li class="service-pinterest_com"><a href="#offline" class="main-favicon icon-pinterest_com">pinterest.com</a></li>
+                                <li class="service-threads"><a href="#offline" class="main-favicon icon-threads">Threads</a></li>
+                                <li class="service-convert-to-mp4"><a href="#offline" class="main-favicon icon-convert-to-mp4">MP4 Converter</a></li>
+                                <li class="service-convert-mp4-to-mp3"><a href="#offline" class="main-favicon icon-convert-mp4-to-mp3">MP4 to MP3</a></li>
+                                <li class="service-convert-mov-to-mp4"><a href="#offline" class="main-favicon icon-convert-mov-to-mp4">MOV to MP4</a></li>
+                                <li class="service-convert-mp4-to-gif"><a href="#offline" class="main-favicon icon-convert-mp4-to-gif">MP4 to GIF</a></li>
+                                <li class="service-convert-mkv-to-mp4"><a href="#offline" class="main-favicon icon-convert-mkv-to-mp4">MKV to MP4</a></li>
+                                <li class="service-convert-webm-to-mp4"><a href="#offline" class="main-favicon icon-convert-webm-to-mp4">WEBM to MP4</a></li>
+                                <li class="service-youtube-transcript"><a href="#offline" class="main-favicon icon-youtube-transcript">YouTube Transcript</a></li>
+                                <li class="service-youtube-subtitles-download"><a href="#offline" class="main-favicon icon-youtube-subtitles-download">YouTube Subtitles</a></li>
+                            </ul>
+                        </div>
+                    </nav>
+
+
+                    <div class="how-to-use-v2">
+                        <h1>Free Online Video Downloader</h1>
+
+                        <h2>Download Videos Easily with SubDown.Net</h2>
+                        <p>SubDown.Net downloads online videos and music for you. Millions of people use it to save media from popular platforms, and there's no software to install. It runs in the browser on both desktop computers and mobile devices, and
+                            the interface keeps the whole download simple.</p>
+                        <p>Whether you want YouTube videos, shows, or sports highlights, SubDown.Net gets the job done. Copy the video URL, paste it into the download field, and click the download button. If you want a faster workflow, our Chrome browser
+                            extension adds one-click downloading right to your browser.</p>
+
+                        <h2>Download High-Quality MP4 Videos</h2>
+                        <p>A saved video gives you more control than streaming does. The SubDown.Net video downloader keeps the original quality, so your MP4 downloads match the source resolution.</p>
+                        <p>Build your own video collection knowing each download keeps its high-definition quality. Your saved MP4 files look the same as they do online. That's handy for travel, places with limited internet, or anytime you want your videos
+                            ready to watch.</p>
+
+                        <h2>Complete Guide to Downloading High-Quality MP4 Videos Online</h2>
+                        <ol>
+                            <li class="how-to-step-apk">
+                                <div class="how-to-step-apk-top">
+                                    <a class="install-apk-button" href="#offline" target="_top"><img src="/img/main/android.svg"
+                                                                                       width="26" height="30"
+                                                                                       alt="Mobile App for Video Downloads">Download
+              Mobile App</a>
+                                    <picture class="left-picture">
+                                        <source type="image/webp" srcset="/img/main/steps/apk.webp">
+                                        <img src="/img/main/steps/apk.webp" width="363" height="188" alt="Download the Mobile App" />
+                                    </picture>
+                                </div>
+                                <div class="how-to-use-middle-text">
+                                    <p><strong>Copy the video URL you want to download</strong> and visit our video download page. Insert the link into the input box, then hit "Enter" or select "Download" to start the downloading process.</p>
+                                </div>
+                            </li>
+                            <li class="how-to-step-1">
+                                <div class="how-to-use-middle-text">
+                                    <p><strong>Begin by copying the video URL</strong> from your preferred video platform. Navigate to our download page and insert the link into the designated field. Select "Download" or hit "Enter" to launch the video conversion.</p>
+                                </div>
+                                <picture>
+                                    <source type="image/webp" srcset="/img/main/steps/step-1.webp">
+                                    <img src="/img/main/steps/step-1.webp" width="386" height="248" alt="Step 1: Copy Video Link" />
+                                </picture>
+                                <span class="how-to-use-middle-arrow"></span>
+                            </li>
+                            <li class="how-to-step-2">
+                                <div class="how-to-use-middle-text">
+                                    <p>Accelerate your video downloads by inserting <strong>"downsub.hassanagro.com/"</strong> or <strong>"downsub.hassanagro.com/"</strong> directly before any video URL. Hit <strong>Enter</strong> to proceed. Example: <a href="#offline"
+                                            target="_blank" rel="nofollow noopener noreferrer">downsub.hassanagro.com/http://youtube.com/watch?v=u7deClndzQw</a></p>
+                                </div>
+                                <picture class="left-picture">
+                                    <source media="(max-width: 768px)" type="image/webp" srcset="/img/main/steps/helper.webp">
+                                    <img src="/img/main/steps/step-2.png" width="386" height="248" alt="Step 2: Add SubDown to URL" />
+                                </picture>
+                            </li>
+                            <li class="how-to-step-3">
+                                <div class="how-to-use-middle-text">
+                                    <p>Access our optimized domain <strong class="green-bold">downsub.hassanagro.com</strong> for faster video downloads and improved user experience.</p>
+                                </div>
+                                <picture>
+                                    <source media="(max-width: 768px)" type="image/webp" srcset="/img/main/steps/step-2.webp">
+                                    <img src="/img/main/steps/step-3.png" width="386" height="248" alt="Step 3: Use downsub.hassanagro.com" />
+                                </picture>
+                                <span class="how-to-use-middle-arrow"></span>
+                            </li>
+                            <li class="how-to-step-helper">
+                                <div class="how-to-use-middle-text">
+                                    <p><strong>Download our browser extension</strong> for immediate, single-click video downloads directly from your web browser interface.</p>
+                                    <a class="install-helper-button" href="#offline" target="_top"><img src="/img/main/download.svg"
+                                                                                      width="25" height="26"
+                                                                                      alt="Download Browser Extension">Install
+              Helper</a>
+                                </div>
+                                <picture class="left-picture">
+                                    <source media="(max-width: 768px)" type="image/webp" srcset="/img/main/steps/step-3.webp">
+                                    <img src="/img/main/steps/helper.png" width="386" height="248" alt="Install Browser Extension" />
+                                </picture>
+                            </li>
+                        </ol>
+
+                        <div class="how-to-use-bottom">
+                            <div class="how-to-use-bottom-text">
+                                <h2>Download Videos in Any Resolution - From SD to Crisp 4K</h2>
+                                <p>Get videos in the best quality available. The downloader supports a range of resolutions, from standard definition (SD) up to 4K. It pulls the original quality straight from the source, so when a creator uploads in 1080p
+                                    HD, you download it at the same 1080p HD. Watch your saved videos offline with their original quality intact.</p>
+                            </div>
+                            <img src="/img/main/4k.svg" width="354" height="216" alt="Download videos in HD, Full HD, and 4K resolution">
+                        </div>
+                        <div class="how-to-use-bottom mb-100">
+                            <div class="how-to-use-bottom-text">
+                                <h2>Download Videos on Any Browser</h2>
+                                <p>The video downloader works on every major web browser. Chrome, Firefox, Safari, Opera, or other Chromium-based browsers all save videos the same way, quickly and reliably, whichever one you use day to day.</p>
+                            </div>
+                            <img src="/img/main/video.svg" width="354" height="217" alt="Video downloader compatible with all major browsers">
+                        </div>
+
+                        <section itemType="https://schema.org/FAQPage" itemscope="">
+                            <div class="sf_faq">
+                                <div class="sf_faq_title">
+                                    <h2>Frequently Asked Questions</h2>
+                                </div>
+
+                                <div class="faq_item" itemscope="" itemprop="mainEntity" itemtype="https://schema.org/Question">
+                                    <div class="faq_item_title">
+                                        <h3 itemprop="name">How can I download videos from any website?</h3>
+                                        <div class="arrow"></div>
+                                    </div>
+                                    <div class="faq_item_content" itemscope="" itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+                                        <div itemprop="text">
+                                            <p>SubDown is a free online video downloader that works with hundreds of popular websites, including YouTube, Facebook, Instagram, TikTok, and many others. To download a video, copy the video URL from the
+                                                page and paste it into the search field on our homepage. The service will instantly generate available download options so you can save the video to your computer, tablet, or smartphone. For quicker access,
+                                                you can install our browser extension, which adds a download button directly to supported video pages and lets you save content in just one click.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="faq_item" itemscope="" itemprop="mainEntity" itemtype="https://schema.org/Question">
+                                    <div class="faq_item_title">
+                                        <h3 itemprop="name">How can I download videos via a URL?</h3>
+                                        <div class="arrow"></div>
+                                    </div>
+                                    <div class="faq_item_content" itemscope="" itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+                                        <div itemprop="text">
+                                            <p>To download a video using a URL, simply copy the direct link from any supported platform such as YouTube, Vimeo, or Dailymotion. Paste the link into the download field on the SubDown homepage and wait a
+                                                few seconds while the system processes the file. You can then choose your preferred format and quality, including MP4 or WebM, with options such as HD, Full HD, or 4K when available. Click the download button
+                                                to save the video file directly to your device.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="faq_item" itemscope="" itemprop="mainEntity" itemtype="https://schema.org/Question">
+                                    <div class="faq_item_title">
+                                        <h3 itemprop="name">What is the best video downloader for Chrome?</h3>
+                                        <div class="arrow"></div>
+                                    </div>
+                                    <div class="faq_item_content" itemscope="" itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+                                        <div itemprop="text">
+                                            <p>The SubDown Helper extension is widely considered one of the top Chrome video downloader extensions available today. This free Chrome add-on integrates directly into your browser and supports downloads
+                                                from more than 40 major video and social media platforms. It works reliably with YouTube videos, Facebook posts, Instagram stories, and other streaming pages. The extension is lightweight, secure, and designed
+                                                to provide stable download performance across supported formats.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="faq_item" itemscope="" itemprop="mainEntity" itemtype="https://schema.org/Question">
+                                    <div class="faq_item_title">
+                                        <h3 itemprop="name">What is the best all-in-one video downloader?</h3>
+                                        <div class="arrow"></div>
+                                    </div>
+                                    <div class="faq_item_content" itemscope="" itemprop="acceptedAnswer" itemtype="https://schema.org/Answer">
+                                        <div itemprop="text">
+                                            <p>SubDown is an all-in-one online video downloader that supports more than 40 websites, including YouTube, TikTok, Facebook, Instagram, Twitter, Vimeo, and Dailymotion. The tool runs directly in your browser,
+                                                so there is no need to install additional software. You can download videos in multiple formats such as MP4 or WebM and choose from a range of quality options, from 144p up to 4K resolution when provided
+                                                by the original source. The platform is focused specifically on video downloads and does not include video-to-audio conversion features, making it a dedicated solution for saving online videos from various
+                                                websites.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+            <style>
+                .main-block {
+                    padding-bottom: 0px;
+                }
+
+                .open-link-form-new #link-form-old-cont {
+                    margin-bottom: 40px;
+                }
+
+                #main>div.downloader-block>div.downloader-2.downloader-2-part2>h1 {
+                    font-family: 'Roboto', sans-serif;
+                    font-style: normal;
+                    font-weight: bold;
+                    font-size: 40px;
+                    line-height: 48px;
+                    color: #434343;
+                    letter-spacing: -0.01em;
+                    padding-bottom: 20px;
+                }
+
+                .main-block .wrapper.wrapper-after-output {
+                    padding-top: 0;
+                }
+
+                .site-info-tabs {
+                    width: 940px;
+                }
+
+                .site-info-tabs .show-mobile-only {
+                    display: none;
+                }
+
+                .site-info-tabs h2 {
+                    font-family: 'Roboto', sans-serif;
+                    font-style: normal;
+                    font-weight: bold;
+                    font-size: 35px;
+                    line-height: 41px;
+                    text-align: center;
+                    color: #000000;
+                    margin-top: 60px;
+                    margin-bottom: 40px;
+                }
+
+                @media screen and (max-width: 979px) {
+                    .main-block .wrapper {
+                        max-width: calc(100% - 28px);
+                        padding-left: 14px;
+                        padding-right: 14px;
+                    }
+                    .site-info-tabs {
+                        width: 100%;
+                    }
+                }
+
+                @media screen and (max-width: 720px) {
+                    .site-info-tabs h2 {
+                        font-family: 'Roboto', sans-serif;
+                        margin-top: 40px;
+                        margin-bottom: 24px;
+                        font-style: normal;
+                        font-weight: bold;
+                        font-size: 22px;
+                        line-height: 26px;
+                        text-align: left;
+                        color: #000000;
+                    }
+                }
+
+                @media screen and (max-width: 580px) {
+                    ul.supported-services li {
+                        width: 40%;
+                    }
+                }
+            </style>
+
+        </div>
     </div>
-    <div class="chips">
-      <span class="chip">YouTube</span><span class="chip">TikTok</span><span class="chip">Instagram</span>
-      <span class="chip">Facebook</span><span class="chip">X</span><span class="chip">Vimeo</span>
-      <span class="chip">Dailymotion</span><span class="chip">Reddit</span><span class="chip">+ more</span>
+    <!--/content-->
+
+    <!-- verify-admitad: "ef27e00c36" -->
     </div>
-    <div id="result">
-      <img id="thumb" alt="">
-      <div class="meta"><b id="title"></b><br><span id="details"></span></div>
-      <div class="quals" id="quals"></div>
-      <div style="margin-top:14px"><button id="dlBtn">Download</button></div>
-    </div>
-    <div id="status"></div>
-  </div>
-  <div class="note">
-    <b>Kaise kaam karta hai:</b> link server par jata hai, video pehle server par download hoti hai, phir aap ko milti hai aur server se delete ho jati hai. Is liye agar video aap ke country mein blocked hai lekin server ke country mein available hai, to download ho sakta hai.<br><br>
-    <b>Limit:</b> sirf public videos. Private, login-only, ya age-restricted videos download nahi hongi. Agar video server ke country mein bhi blocked hai, to wo bhi nahi hogi. Sirf apni ya ijazat wali videos download karein, copyright ka khayal rakhein.
-  </div>
-</div>
-<script>
-const $ = id => document.getElementById(id);
-let currentUrl = '', quality = 'best';
-$('fetchBtn').onclick = async () => {
-  const url = $('url').value.trim();
-  if (!url) return $('status').textContent = 'Pehle link paste karein.';
-  $('fetchBtn').disabled = true; $('status').textContent = 'Video ki info server se li ja rahi hai…';
-  $('result').style.display = 'none';
-  try {
-    const r = await fetch('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || 'Fetch failed');
-    currentUrl = url; quality = 'best';
-    $('thumb').src = j.thumbnail || '';
-    $('title').textContent = j.title || 'Video';
-    $('details').textContent = `${j.platform || ''} · ${j.uploader || ''} · ${j.duration ? Math.floor(j.duration/60) + ':' + String(j.duration%60).padStart(2,'0') : ''}`;
-    const q = $('quals'); q.innerHTML = '';
-    const opts = [{label:'Best quality', v:'best'}].concat((j.formats||[]).map(f=>({label:f.label, v:String(f.height)}))).concat([{label:'Audio MP3', v:'audio'}]);
-    opts.forEach((o,i)=>{ const b=document.createElement('button'); b.textContent=o.label; if(i===0)b.classList.add('active');
-      b.onclick=()=>{ quality=o.v; q.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); };
-      q.appendChild(b); });
-    $('result').style.display = 'block';
-    $('status').textContent = 'Ready — quality choose karein aur Download dabayein.';
-  } catch(e){ $('status').textContent = e.message; }
-  $('fetchBtn').disabled = false;
-};
-$('dlBtn').onclick = async () => {
-  if (!currentUrl) return;
-  $('dlBtn').disabled = true;
-  $('status').textContent = 'Server par download start ho gaya hai — ye background mein chalega, aap page par hi rahein.';
-  try {
-    const r = await fetch('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, quality }) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || 'Job start failed');
-    const poll = setInterval(async () => {
-      try {
-        const s = await (await fetch('/api/jobs/' + j.jobId)).json();
-        if (s.status === 'downloading') { $('status').textContent = `Server par download ho raha hai… ${s.progress || 0}%`; return; }
-        clearInterval(poll); $('dlBtn').disabled = false;
-        if (s.status === 'ready') { $('status').textContent = 'Ready — file aap tak bheji ja rahi hai.'; window.location = '/api/jobs/' + j.jobId + '/file'; }
-        else $('status').textContent = s.error || 'Download fail ho gaya.';
-      } catch (e) { clearInterval(poll); $('dlBtn').disabled = false; $('status').textContent = e.message; }
-    }, 2000);
-  } catch (e) { $('dlBtn').disabled = false; $('status').textContent = e.message; }
-};
-$('url').addEventListener('keydown', e => { if (e.key === 'Enter') $('fetchBtn').click(); });
-</script>
+    <!--/main-->
+
+    <!--Footer-->
+    <footer class="footer_v2">
+        <div class="wrapper">
+            <nav class="lang-box" tabindex="0" style="z-index:1000;" translate="no">
+                <ul class="lang">
+                    <li><a href="#offline" class="lang-ar">العربية</a></li>
+                    <li><a href="#offline" class="lang-de">Deutsch</a></li>
+                    <li class="active"><span class="lang-en">English</span></li>
+                    <li><a href="#offline" class="lang-es">Español</a></li>
+                    <li><a href="#offline" class="lang-fr">‪Français</a></li>
+                    <li><a href="#offline" class="lang-hi">हिन्दी‎</a></li>
+                    <li><a href="#offline" class="lang-id">Bahasa Indonesia‬</a></li>
+                    <li><a href="#offline" class="lang-it">‪Italiano‬</a></li>
+                    <li><a href="#offline" class="lang-ja">日本語</a></li>
+                    <li><a href="#offline" class="lang-ko">한국어</a></li>
+                    <li><a href="#offline" class="lang-pl">Polski‎</a></li>
+                    <li><a href="#offline" class="lang-pt">Português (Brasil)</a></li>
+                    <li><a href="#offline" class="lang-ru">Русский</a></li>
+                    <li><a href="#offline" class="lang-th">ไทย</a></li>
+                    <li><a href="#offline" class="lang-tr">Türkçe‬</a></li>
+                    <li><a href="#offline" class="lang-uk">Українська‬</a></li>
+                    <li><a href="#offline" class="lang-vi">Tiếng Việt</a></li>
+                    <li><a href="#offline" class="lang-zh">简体中文</a></li>
+                </ul>
+            </nav>
+
+            <div class="f-nav-box">
+                <div class="f-nav-box-column copyright-box">
+                    <img src="/img/logo_small2.svg" width="167" height="40" alt="">
+                    <p class="copyright" dir="ltr">© 2008-2026</p>
+                </div>
+                <div class="f-nav-box-column f-nav-container">
+                    <nav class="f-nav">
+                        <div class="f-nav-column f-nav-articles">
+                            <ul>
+                                <li>
+                                    <a href="#offline">YouTube</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">YouTube to mp4</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">YouTube Shorts</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">YouTube Mp3</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">ssYouTube</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">iPhone</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">APP</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">YouTube Transcript</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">YouTube Subtitles</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="f-nav-column f-nav-articles">
+                            <ul>
+                                <li>
+                                    <a href="#offline">Instagram</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">IG stories</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Instagram reels</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Instagram viewer</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Threads</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">VK</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="f-nav-column f-nav-articles">
+                            <ul>
+                                <li>
+                                    <a href="#offline">TikTok</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">TikTok mp4</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">TikTok mp3</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Reddit</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Dailymotion</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="f-nav-column f-nav-articles">
+                            <ul>
+                                <li>
+                                    <a href="#offline">Facebook</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Vimeo</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">How to</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Pinterest</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">APK</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">FAQ</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Install</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="f-nav-column f-nav-articles">
+                            <ul>
+                                <li>
+                                    <a href="#offline">Mp4 Converter</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">MP4 to MP3</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">MOV to MP4</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">MP4 to GIF</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">MKV to MP4</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">WEBM to MP4</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="f-nav-column f-nav-articles">
+                            <ul>
+                                <li>
+                                    <a href="#offline">For webmasters</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Feedback</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">API</a>
+                                </li>
+                                <li>
+                                    <a href="#offline">Advertising</a>
+                                </li>
+                                <li>
+                                    <a href="#offline" rel="nofollow">Terms of Service</a>
+                                </li>
+                                <li>
+                                    <a href="#offline" rel="nofollow">EULA</a>
+                                </li>
+                                <li>
+                                    <a href="#offline" rel="nofollow">PP</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+
+
+    <script type='application/ld+json'>
+        {
+            "@context": "http://schema.org/",
+            "@type": "SoftwareApplication",
+            "applicationCategory": "MultimediaApplication",
+            "operatingSystem": [
+                "Windows",
+                "macOS",
+                "Android",
+                "iOS"
+            ],
+            "screenshot": "//assets/experiment/sf-helper/img/helper_button_screenshot_en.png",
+            "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingCount": "55424",
+                "reviewCount": "55424",
+                "bestRating": "5",
+                "ratingValue": "4.8",
+                "worstRating": "1",
+                "alternateName": "SubDown — Free Online Video Downloader",
+                "mainEntityOfPage": "/",
+                "name": "SubDown"
+            },
+            "alternativeHeadline": "SubDown",
+            "copyrightYear": "2026",
+            "headline": "SubDown",
+            "keywords": "subdown",
+            "offers": {
+                "@type": "Offer",
+                "price": "0.0",
+                "priceCurrency": "USD",
+                "alternateName": "SubDown",
+                "description": "Download videos from popular platforms with SubDown, the leading free online video downloader. Easily save videos in various formats and resolutions. Start downloading now!",
+                "mainEntityOfPage": "/",
+                "name": "SubDown"
+            },
+            "alternateName": "SubDown",
+            "mainEntityOfPage": "/",
+            "name": "SubDown"
+        }
+    </script>
+    
+<script src="/js/libs/jquery-3.6.0.min.js"></script>
+<script src="/subdown.js"></script>
 </body>
+
 </html>
+
+<!--HEADER CLEAR-->
+
+
+
+<!--TOP CLEAR-->
+
+
+<!--MAIN FORM CLEAR-->
+
+
+<!--FORM CLEAR-->
+
+
+<!--/FORM CLEAR-->
+
+
+
+<!--/MAIN FORM CLEAR-->
+<!--ARTICLE-->
+
+<!--CONTENT END-->
+<!--FOOTER-->
+
+
+
+
+
+
+
+
+
+
+

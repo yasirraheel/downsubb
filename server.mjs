@@ -56,7 +56,7 @@ console.log(`SubDown starting: yt-dlp=${YTDLP} ffmpeg=${FFMPEG || 'none'} cookie
 const MAX_BYTES = Number(process.env.MAX_BYTES || 2 * 1024 * 1024 * 1024); // 2 GB
 const MAX_DURATION = Number(process.env.MAX_DURATION || 3 * 60 * 60); // 3 hours
 
-const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json' };
 // Own-backend args, applied to every yt-dlp call. No API, no login
 // is required for the server itself: yt-dlp + Deno (JS challenge
 // solver, ~/bin/deno on Hostinger) + ffmpeg are all self-contained.
@@ -199,10 +199,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       res.writeHead(200, { 'Content-Type': mime['.html'] }); fs.createReadStream(path.join(publicDir, 'index.html')).pipe(res); return;
     }
-    if (req.method === 'GET' && u.pathname.startsWith('/public/')) {
-      const f = path.resolve(publicDir, u.pathname.slice(8));
-      if (!f.startsWith(publicDir)) return res.writeHead(403).end();
-      if (!fs.existsSync(f)) return res.writeHead(404).end('Not found');
+    if (req.method === 'GET' && !u.pathname.startsWith('/api/')) {
+      // Static assets from public/ (exact template design: /build, /img, /font, /js, /subdown.js)
+      const rel = u.pathname === '/' || u.pathname === '/index.html' ? 'index.html' : u.pathname.replace(/^\/+/, '');
+      const f = path.resolve(publicDir, rel);
+      if (!f.startsWith(publicDir) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return res.writeHead(404).end('Not found');
       res.writeHead(200, { 'Content-Type': mime[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res); return;
     }
     if (req.method === 'POST' && u.pathname === '/api/info') {
