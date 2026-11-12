@@ -124,11 +124,17 @@ function runYtDlp(args, url, timeoutMs = 120000) {
     p.stdout.on('data', d => { out += d; if (out.length > 5_000_000) p.kill(); });
     p.stderr.on('data', d => { err += d; });
     p.on('error', e => { clearTimeout(t); reject(new Error(`yt-dlp not found at ${YTDLP}. (${e.message})`)); });
-    p.on('close', code => { clearTimeout(t); if (code === 0) resolve(out); else reject(new Error(friendlyError(err || out || `yt-dlp exited with code ${code}`))); });
+    p.on('close', code => { clearTimeout(t); if (code === 0) resolve(out); else reject(new Error(friendlyError(err || out || `yt-dlp exited with code ${code}`, url))); });
   });
 }
-function friendlyError(raw) {
+function friendlyError(raw, url) {
   const s = raw.toLowerCase();
+  // YouTube is flagged on our server IP right now: bot-checks and
+  // storyboard-only responses mean no formats, even logged in. Show a
+  // clear "we are working on it" message instead of a scary error.
+  if (url && detectPlatform(url) === 'YouTube' && (s.includes('sign in to confirm') || s.includes("confirm you're not a bot") || s.includes('requested format is not available') || s.includes('the page needs to be reloaded') || s.includes('storyboard'))) {
+    return 'YouTube downloads are temporarily unavailable. We are working on it and they will be back soon.';
+  }
   if (s.includes('not available in your country') || s.includes('blocked in your country')) return 'This video is not available in this region, so it cannot be downloaded here.';
   if (s.includes('private video') || s.includes('login required') || s.includes('sign in')) return 'This video is private or needs a login. It cannot be opened without an account.';
   if (s.includes('412') || s.includes('precondition failed')) return 'That site blocked the download request (HTTP 412). This video cannot be downloaded from here.';
@@ -413,7 +419,7 @@ function pickJobFile(job, jobDir) {
 }
 function finishJob(job, jobDir, errText) {
   if (job.status === 'error') return;
-  if (errText) { job.status = 'error'; job.error = friendlyError(errText); pumpQueue(); return; }
+  if (errText) { job.status = 'error'; job.error = friendlyError(errText, job.url); pumpQueue(); return; }
   try {
     // Finished media only: ignore resume state (.part/.ytdl) and meta.json.
     const file = pickJobFile(job, jobDir);
@@ -500,7 +506,7 @@ function runYtDlpJob(job, jobDir) {
         setTimeout(() => { if (job.status !== 'cancelled') runYtDlpJob(job, jobDir); }, delay);
         return;
       }
-      job.status = 'error'; job.error = friendlyError(msg); pumpQueue(); return;
+      job.status = 'error'; job.error = friendlyError(msg, job.url); pumpQueue(); return;
     }
     finishJob(job, jobDir, null);
   });
