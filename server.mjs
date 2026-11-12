@@ -162,11 +162,11 @@ function downloadArgs(url, quality, outTpl) {
 // the download. The signed key is IP-bound, so everything must be
 // fetched from this same server.
 function beegId(url) { const m = String(url).match(/beeg\.com\/(?:video\/)?-?(\d+)/i); return m ? m[1].replace(/^0+/, '') || '0' : null; }
-function fetchText(url, referer) {
+function fetchText(url, referer, extraHeaders) {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith('https:') ? https : http;
-    const req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36', ...(referer ? { Referer: referer } : {}) } }, res => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return resolve(fetchText(new URL(res.headers.location, url).toString(), referer));
+    const req = lib.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36', ...(referer ? { Referer: referer } : {}), ...(extraHeaders || {}) } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return resolve(fetchText(new URL(res.headers.location, url).toString(), referer, extraHeaders));
       if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
       let b = ''; res.setEncoding('utf8'); res.on('data', d => { b += d; if (b.length > 5_000_000) req.destroy(); }); res.on('end', () => resolve(b));
     });
@@ -244,6 +244,107 @@ function beegVariantFor(info, quality) {
   const want = quality === 'best' ? 1080 : (parseInt(quality, 10) || 720);
   const ok = info.formats.filter(f => f.height <= want);
   return (ok[0] || info.formats[info.formats.length - 1]);
+}
+
+// ---- Bilibili (native, no yt-dlp: bilibili.com answers the video
+// webpage with HTTP 412 from this server's IP, so yt-dlp's extractor
+// never gets past "Downloading webpage" and falls back to generic
+// (no formats at all). The api.bilibili.com endpoints work fine with
+// a buvid3 device cookie, and the playurl API hands back a direct
+// mp4 — same native pattern as Beeg. No login: the API grants at
+// most 720p anonymously, so only 720p/480p/360p are offered.
+function bilibiliId(url) {
+  try {
+    const u = new URL(url);
+    if (!/(\.|^)bilibili\.com$/.test(u.hostname)) return null;
+    const m = u.pathname.match(/\/video\/(BV[\w]+|av\d+)/i);
+    if (!m) return null;
+    const id = m[1];
+    return /^bv/i.test(id) ? { bvid: id } : { aid: id.slice(2) };
+  } catch { return null; }
+}
+async function bilibiliApi(path, buvid3) {
+  const text = await fetchText('https://api.bilibili.com' + path, 'https://www.bilibili.com/', {
+    ...(buvid3 ? { Cookie: `buvid3=${buvid3}` } : {}),
+  });
+  const j = JSON.parse(text);
+  if (j.code !== 0) throw new Error('Bilibili API error: ' + (j.message || j.code));
+  return j.data;
+}
+async function getBilibiliInfo(id) {
+  // Device cookie first: without buvid3 the API returns a block page.
+  const spi = JSON.parse(await fetchText('https://api.bilibili.com/x/frontend/finger/spi'));
+  const buvid3 = spi?.data?.b_3 || '';
+  const q = id.bvid ? `bvid=${id.bvid}` : `aid=${id.aid}`;
+  const view = await bilibiliApi(`/x/web-interface/view?${q}`, buvid3);
+  const cid = view.pages?.[0]?.cid || view.cid;
+  if (!cid) throw new Error('No video found for this Bilibili link.');
+  return {
+    title: view.title || 'Bilibili video',
+    duration: view.duration || 0,
+    thumbnail: (view.pic || '').replace(/^http:/, 'https:'),
+    formats: [{ label: '720p', height: 720 }, { label: '480p', height: 480 }, { label: '360p', height: 360 }],
+    buvid3, cid, bvid: id.bvid, aid: id.aid,
+  };
+}
+function bilibiliQn(quality) {
+  // qn codes: 16=360p, 32=480p, 64=720p, 80=1080p (needs login; the
+  // API downgrades anonymous requests to 720p, so ask for 80 = best).
+  const want = quality === 'best' ? 80 : (parseInt(quality, 10) || 720);
+  if (want >= 720) return 80;
+  if (want >= 480) return 32;
+  return 16;
+}
+async function bilibiliFileUrl(info, quality) {
+  const q = info.bvid ? `bvid=${info.bvid}` : `aid=${info.aid}`;
+  const data = await bilibiliApi(`/x/player/playurl?${q}&cid=${info.cid}&qn=${bilibiliQn(quality)}&fnval=1`, info.buvid3);
+  const durl = data.durl?.[0];
+  if (!durl?.url) throw new Error('No downloadable file for this Bilibili video.');
+  return durl.url;
+}
+function runBilibiliJob(job, jobDir) {
+  getBilibiliInfo(bilibiliId(job.url)).then(async info => {
+    try {
+      const fileUrl = await bilibiliFileUrl(info, job.quality);
+      const mp4File = path.join(jobDir, `${safeName(info.title)}.mp4`);
+      const mp3File = path.join(jobDir, `${safeName(info.title)}.mp3`);
+      const p = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'info', '-headers', 'Referer: https://www.bilibili.com/', '-user_agent', 'Mozilla/5.0', '-i', fileUrl, '-c', 'copy', mp4File], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+      job.proc = p;
+      let err = '';
+      const dur = info.duration || 0;
+      p.stderr.on('data', d => {
+        err += d;
+        const m = err.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g);
+        if (m && dur) {
+          const last = m[m.length - 1].match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+          const secs = (+last[1]) * 3600 + (+last[2]) * 60 + parseFloat(last[3]);
+          job.progress = Math.min(99, Math.round(secs / dur * 100));
+        } else if (m) job.progress = 50;
+      });
+      p.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+      p.on('close', code => {
+        job.proc = null;
+        if (job.status === 'cancelled') return;
+        if (code !== 0) { finishJob(job, jobDir, err || `ffmpeg exited with code ${code}`); return; }
+        if (job.quality === 'audio') {
+          const c = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4File, '-vn', '-c:a', 'libmp3lame', '-q:a', '2', mp3File], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+          job.proc = c;
+          let cerr = '';
+          c.stderr.on('data', d => { cerr += d; });
+          c.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; });
+          c.on('close', ccode => {
+            job.proc = null;
+            if (job.status === 'cancelled') return;
+            if (ccode !== 0) { finishJob(job, jobDir, cerr || `ffmpeg exited with code ${ccode}`); return; }
+            try { fs.rmSync(mp4File, { force: true }); } catch {}
+            finishJob(job, jobDir, null);
+          });
+          return;
+        }
+        finishJob(job, jobDir, null);
+      });
+    } catch (e) { job.status = 'error'; job.error = 'This Bilibili video could not be downloaded. The link may be wrong, or the video was removed.'; }
+  }).catch(e => { job.status = 'error'; job.error = 'This Bilibili video could not be found. The link may be wrong, or the video was removed.'; });
 }
 function isDirectMedia(url) {
   try { const p = new URL(url).pathname.toLowerCase(); return /\.(mp4|webm|mov|mkv|m3u8|mp3|m4a|wav|avi)$/.test(p); } catch { return false; }
@@ -361,6 +462,10 @@ function startJob(url, quality) {
     }).catch(e => { job.status = 'error'; job.error = 'This Beeg video could not be found. The link may be wrong, or the video was removed.'; });
     return job;
   }
+  // Bilibili: native API download (yt-dlp cannot: bilibili.com 412s
+  // the webpage from this IP, so it finds no formats at all).
+  const bili = bilibiliId(url);
+  if (bili && FFMPEG) { runBilibiliJob(job, jobDir); return job; }
   // Direct media: ffmpeg trick, no login/API.
   if (isDirectMedia(url) && FFMPEG) {
     const ext = new URL(url).pathname.split('.').pop().toLowerCase().split('?')[0] || 'mp4';
@@ -388,7 +493,9 @@ function recoverJobs() {
       const finished = !!pickJobFile({ url: meta.url, quality: meta.quality || 'best' }, dir);
       const job = { id, url: meta.url, quality: meta.quality || 'best', status: finished ? 'ready' : 'downloading', progress: finished ? 100 : 0, error: null, file: null, size: 0, name: null, createdAt: meta.createdAt || Date.now() };
       jobs.set(id, job);
-      if (finished) finishJob(job, dir, null); else runYtDlpJob(job, dir);
+      if (finished) finishJob(job, dir, null);
+      else if (bilibiliId(meta.url) && FFMPEG) runBilibiliJob(job, dir);
+      else runYtDlpJob(job, dir);
     }
   } catch {}
 }
@@ -466,6 +573,16 @@ const server = http.createServer(async (req, res) => {
           const info = await getBeegInfo(bid);
           return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: info.thumbnail || '', platform: 'Beeg', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
         } catch (e) { return sendJson(res, 500, { error: 'This Beeg video could not be found. The link may be wrong, or the video was removed.' }); }
+      }
+      // Bilibili: native resolution (yt-dlp finds no formats: the
+      // video webpage 412s from this server's IP).
+      const bili = bilibiliId(url);
+      if (bili) {
+        try {
+          const info = await getBilibiliInfo(bili);
+          if (info.duration && info.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(info.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
+          return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: info.thumbnail || '', platform: 'Bilibili', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
+        } catch (e) { return sendJson(res, 500, { error: 'This Bilibili video could not be found. The link may be wrong, or the video was removed.' }); }
       }
       const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url]);
       const j = JSON.parse(out);

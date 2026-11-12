@@ -124,7 +124,7 @@
   }
   document.addEventListener('click', function (ev) {
     var faq = ev.target.closest ? ev.target.closest('.faq_item_title') : null;
-    if (faq) { var item = faq.closest('.faq_item'); if (item) item.classList.toggle('active'); return; }
+    if (faq) { var item = faq.closest('.faq_item'); if (item) { var wasOpen = item.classList.contains('active'); document.querySelectorAll('.faq_item.active').forEach(function (x) { x.classList.remove('active'); }); if (!wasOpen) item.classList.add('active'); } return; }
     var d = ev.target.closest ? ev.target.closest('[data-del]') : null;
     if (d) { removeFromQueue(d.getAttribute('data-del')); return; }
     var b = ev.target.closest ? ev.target.closest('[data-cancel]') : null;
