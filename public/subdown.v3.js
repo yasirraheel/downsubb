@@ -22,7 +22,7 @@
     '.sd-q{display:inline-block;margin:5px;padding:11px 20px;cursor:pointer;border:none;border-radius:8px;background:#84bd07;color:#fff;font-size:15px;font-weight:700}' +
     '.sd-q:hover{background:#74a806}' +
     '.sd-mp3{display:inline-block;margin:5px;padding:11px 20px;cursor:pointer;border:2px solid #84bd07;border-radius:8px;background:#fff;color:#5a7d05;font-size:15px;font-weight:700}' +
-    '.sd-status{margin:16px auto;padding:14px 18px;border:1px solid #d9e8d9;border-left:5px solid #84bd07;border-radius:10px;background:#f6fbf0;display:flex;align-items:center;justify-content:center;gap:12px;font-size:15px;color:#2f4d0a;text-align:left}' +
+    '.sd-status{margin:16px auto;padding:0;border:0;border-radius:0;background:none;display:flex;align-items:center;justify-content:center;gap:12px;font-size:15px;color:#2f4d0a;text-align:left}' +
     '.sd-error{margin:16px auto;padding:16px 18px;border:1px solid #f5c2c7;border-left:5px solid #dc3545;border-radius:10px;background:#fff5f5;text-align:left}' +
     '.sd-spin{width:26px;height:26px;min-width:26px;border:3px solid #d9e8d9;border-top-color:#84bd07;border-radius:50%;animation:sd-rot 1s linear infinite}' +
     '@keyframes sd-rot{to{transform:rotate(360deg)}}' +
