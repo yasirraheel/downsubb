@@ -243,8 +243,8 @@
       (info.thumbnail ? '<img src="' + thumbSrc(info.thumbnail, url) + '" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">' : '') +
       '<h3>' + esc(info.title || 'Video') + '</h3>' +
       '<p class="sd-meta">' + esc(info.platform || '') + (info.duration ? ' &bull; ' + Math.round(info.duration / 60) + ' min' : '') + '</p>' +
-      '<p style="font-weight:700;margin:0 0 6px">' + (info.audioOnly ? 'Audio:' : 'Choose quality:') + '</p><div>' + (btns || '<button type="button" class="sd-q" data-q="best">Download</button>') + '</div>' +
-      (info.audioOnly ? '' : '<button type="button" class="sd-mp3" data-q="audio">MP3 Audio</button>') +
+      '<p style="font-weight:700;margin:0 0 6px">' + (info.audioOnly ? 'Audio:' : info.mediaKind === 'image' ? 'Choose image:' : info.mediaKind === 'document' ? 'Choose file:' : 'Choose quality:') + '</p><div>' + (btns || '<button type="button" class="sd-q" data-q="best">Download</button>') + '</div>' +
+      (info.audioOnly || info.noAudio ? '' : '<button type="button" class="sd-mp3" data-q="audio">MP3 Audio</button>') +
       '<p id="sd-status"></p></div>'
     );
     renderQueue();

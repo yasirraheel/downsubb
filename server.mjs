@@ -120,6 +120,7 @@ function detectPlatform(url) {
     if (h.includes('tiktok')) return 'TikTok';
     if (h.includes('instagram')) return 'Instagram';
     if (h.includes('facebook') || h === 'fb.watch') return 'Facebook';
+    if (h.includes('linkedin') || h === 'lnkd.in') return 'LinkedIn';
     if (h.includes('twitter') || h === 'x.com') return 'X / Twitter';
     if (h.includes('vimeo')) return 'Vimeo';
     if (h.includes('dailymotion')) return 'Dailymotion';
@@ -169,6 +170,18 @@ function friendlyError(raw, url) {
 function sendJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
 function readBody(req) { return new Promise((resolve, reject) => { let b = ''; req.on('data', d => { b += d; if (b.length > 10000) req.destroy(); }); req.on('end', () => resolve(b)); req.on('error', reject); }); }
 function safeName(s) { return (s || 'video').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'video'; }
+// Content-Type for a finished job file, by extension: images and PDFs
+// (LinkedIn) must not be served as video/mp4, or some browsers and
+// apps will not open them correctly.
+function fileContentType(file) {
+  const ext = path.extname(String(file || '')).toLowerCase();
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.pdf') return 'application/pdf';
+  return 'video/mp4';
+}
 
 function downloadArgs(url, quality, outTpl) {
   // Direct media (.mp4/.webm/...) has no height metadata, so height
@@ -223,7 +236,7 @@ function fetchText(url, referer, extraHeaders) {
 // fetches it (it can reach the CDNs) and streams it back. Only known
 // thumbnail hosts are allowed, only images, max 5 MB, cached on disk
 // for 7 days so repeat views cost nothing.
-const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com', 'sndcdn.com'];
+const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com', 'sndcdn.com', 'licdn.com'];
 const thumbsDir = path.join(root, '.thumbs');
 fs.mkdirSync(thumbsDir, { recursive: true });
 function thumbHostOk(hostname) {
@@ -403,6 +416,193 @@ function runBilibiliJob(job, jobDir) {
     } catch (e) { job.status = 'error'; job.error = 'This Bilibili video could not be downloaded. The link may be wrong, or the video was removed.'; pumpQueue(); }
   }).catch(e => { job.status = 'error'; job.error = 'This Bilibili video could not be found. The link may be wrong, or the video was removed.'; pumpQueue(); });
 }
+// ---- LinkedIn (native, no yt-dlp: yt-dlp has no LinkedIn extractor,
+// so every LinkedIn link failed with "unsupported URL". A public post
+// page is plain HTML with the media URLs embedded in it, no login
+// needed: videos are direct dms.licdn.com mp4 files (one per quality),
+// images are media.licdn.com dms/image files, and document posts
+// expose a manifest whose transcribedDocumentUrl is the real PDF.
+// Same native pattern as Beeg / Bilibili: fetch the page, pull the
+// file URLs out, download them directly from this server. Private
+// posts show a login wall instead of media, so they still fail with a
+// clear message. lnkd.in short links are resolved first.
+function linkedinPostUrl(url) {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.replace(/^www\./, '').toLowerCase();
+    if (h === 'linkedin.com' || h.endsWith('.linkedin.com')) {
+      if (/\/posts\//.test(u.pathname) || /\/feed\/update\/urn:li:(activity|ugcPost):/.test(u.pathname) || /\/embed\/feed\/update\//.test(u.pathname)) {
+        return 'https://www.linkedin.com' + u.pathname.replace(/\/$/, '');
+      }
+      return null;
+    }
+    if (h === 'lnkd.in') return 'SHORT:' + url;
+    return null;
+  } catch { return null; }
+}
+function resolveRedirects(url, left) {
+  return new Promise((resolve, reject) => {
+    let u; try { u = new URL(url); } catch { return reject(new Error('Bad URL')); }
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if ((left ?? 5) <= 0) return reject(new Error('Too many redirects'));
+        res.resume();
+        return resolve(resolveRedirects(new URL(res.headers.location, u).toString(), (left ?? 5) - 1));
+      }
+      res.resume();
+      resolve(u.toString());
+    });
+    req.on('error', reject); req.setTimeout(20000, () => req.destroy(new Error('Timed out')));
+  });
+}
+function decodeEntities(s) {
+  return String(s || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+function parseIsoDuration(s) {
+  const m = String(s || '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?/);
+  if (!m || (!m[1] && !m[2] && !m[3])) return 0;
+  return (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + parseFloat(m[3] || 0);
+}
+async function getLinkedInInfo(pageUrl) {
+  const raw = await fetchText(pageUrl, 'https://www.linkedin.com/');
+  const html = decodeEntities(raw);
+  // Title: og:title is the post text (or "Doc title | Author" for
+  // documents). The page's JSON "name" fields are other people's
+  // names (commenters), so never use those for the title.
+  let title = 'LinkedIn post';
+  const og = raw.match(/<meta property="og:title" content="([^"]+)"/);
+  if (og) {
+    let t = decodeEntities(og[1]).replace(/\s*\|\s*LinkedIn\s*$/i, '').replace(/\s+/g, ' ').trim();
+    if (t.length > 100) t = t.slice(0, 100).replace(/\s+\S*$/, '').trim(); // cut at a word boundary
+    title = t || title;
+  }
+  // Duration: JSON-LD "duration":"PT1M33S" on video posts.
+  let duration = 0;
+  const dm = html.match(/"duration"\s*:\s*"(PT[^"]+)"/);
+  if (dm) duration = parseIsoDuration(dm[1]);
+  // Thumbnail: video cover first, else first post image.
+  let thumbnail = '';
+  const tc = html.match(/https:\/\/media\.licdn\.com\/dms\/image\/v2\/[^\s"<>]*videocover-high[^\s"<>]*/);
+  if (tc) thumbnail = tc[0];
+  // Videos: direct dms.licdn.com mp4 files, one per quality.
+  const videos = [];
+  const vseen = new Set();
+  for (const v of html.match(/https:\/\/dms\.licdn\.com\/playlist\/vid\/v2\/[^\s"<>]+/g) || []) {
+    const q = v.match(/\/mp4-(\d+)p-/);
+    if (!q) continue;
+    const height = parseInt(q[1], 10);
+    if (vseen.has(height)) continue; vseen.add(height);
+    videos.push({ label: `${height}p`, height, fileUrl: v });
+  }
+  videos.sort((a, b) => b.height - a.height);
+  // Images: media.licdn.com dms/image files, one per asset, largest
+  // size variant. Profile photos, backgrounds and video covers are
+  // not post images. URL shape: /dms/image/v2/<assetId>/<size-seg>/...
+  const byId = new Map();
+  for (const im of html.match(/https:\/\/media\.licdn\.com\/dms\/image\/v2\/[^\s"<>]+/g) || []) {
+    if (/profile-displayphoto|profile-displaybackgroundimage|videocover|thumbnail-with-play-button/.test(im)) continue;
+    const parts = im.split('/');
+    const id = parts[6] || '';
+    const seg = parts[7] || '';
+    const w = (seg.match(/_(\d+)(?:_\d+)?$/) || [])[1];
+    const width = w ? parseInt(w, 10) : 0;
+    const cur = byId.get(id);
+    if (!cur || width > cur.width) byId.set(id, { url: im, width });
+  }
+  const images = [...byId.values()].map((x, i) => ({ label: `Image ${i + 1}`, height: `image${i + 1}`, fileUrl: x.url }));
+  // Document: the manifest's transcribedDocumentUrl is the real PDF.
+  let doc = null;
+  const dman = html.match(/https:\/\/media\.licdn\.com\/dms\/document\/pl\/v2\/[^\s"<>]*feedshare-document-master-manifest[^\s"<>]*/);
+  if (dman) {
+    try {
+      const manifest = JSON.parse(await fetchText(dman[0], 'https://www.linkedin.com/'));
+      if (manifest.transcribedDocumentUrl) doc = { label: 'Document (PDF)', height: 'doc', fileUrl: manifest.transcribedDocumentUrl };
+    } catch {}
+  }
+  if (!thumbnail && images.length) thumbnail = images[0].fileUrl;
+  if (!thumbnail) {
+    const ogi = raw.match(/<meta property="og:image" content="([^"]+)"/);
+    if (ogi) thumbnail = decodeEntities(ogi[1]);
+  }
+  const formats = [...videos, ...images, ...(doc ? [doc] : [])];
+  if (!formats.length) throw new Error('No downloadable media found in this LinkedIn post.');
+  const mediaKind = videos.length ? 'video' : (images.length ? 'image' : 'document');
+  return { title, duration, thumbnail, formats, mediaKind };
+}
+function downloadToFile(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    let u; try { u = new URL(url); } catch { return reject(new Error('Bad download URL')); }
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.get(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36', Referer: 'https://www.linkedin.com/' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return resolve(downloadToFile(new URL(res.headers.location, u).toString(), dest, onProgress));
+      }
+      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      const total = parseInt(res.headers['content-length'] || '0', 10) || 0;
+      let got = 0;
+      const ws = fs.createWriteStream(dest);
+      res.on('data', d => { got += d.length; if (onProgress) onProgress(got, total); });
+      res.pipe(ws);
+      ws.on('finish', () => resolve({ size: got, type: res.headers['content-type'] || '' }));
+      ws.on('error', reject);
+      res.on('error', reject);
+    });
+    req.on('error', reject); req.setTimeout(120000, () => req.destroy(new Error('Timed out')));
+  });
+}
+async function runLinkedInJob(job, jobDir) {
+  try {
+    let pageUrl = linkedinPostUrl(job.url);
+    if (pageUrl && pageUrl.startsWith('SHORT:')) pageUrl = linkedinPostUrl(await resolveRedirects(pageUrl.slice(6)));
+    if (!pageUrl) throw new Error('Not a LinkedIn post link.');
+    const info = await getLinkedInInfo(pageUrl);
+    const q = job.quality || 'best';
+    let fmt;
+    if (q === 'audio') fmt = info.formats.find(f => typeof f.height === 'number');
+    else if (q === 'best') fmt = info.formats.find(f => typeof f.height === 'number') || info.formats[0];
+    else fmt = info.formats.find(f => String(f.height) === String(q));
+    if (!fmt) throw new Error('That quality is no longer available for this post.');
+    job.duration = info.duration || 0;
+    try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url: job.url, quality: job.quality, duration: job.duration, createdAt: job.createdAt || Date.now() })); } catch {}
+    const base = safeName(info.title);
+    if (q === 'audio') {
+      // Download the best video, then extract MP3 (same as Bilibili).
+      const mp4File = path.join(jobDir, `${base}.mp4`);
+      await downloadToFile(fmt.fileUrl, mp4File, (got, total) => { if (total) job.progress = Math.min(90, Math.round(got / total * 90)); });
+      const mp3File = path.join(jobDir, `${base}.mp3`);
+      const c = spawn(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', mp4File, '-vn', '-c:a', 'libmp3lame', '-q:a', '2', mp3File], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+      job.proc = c;
+      let cerr = '';
+      c.stderr.on('data', d => { cerr += d; });
+      c.on('error', e => { job.status = 'error'; job.error = `ffmpeg not found. (${e.message})`; pumpQueue(); });
+      c.on('close', ccode => {
+        job.proc = null;
+        if (job.status === 'cancelled') return;
+        if (ccode !== 0) { finishJob(job, jobDir, cerr || `ffmpeg exited with code ${ccode}`); return; }
+        try { fs.rmSync(mp4File, { force: true }); } catch {}
+        finishJob(job, jobDir, null);
+      });
+      return;
+    }
+    const isImage = String(fmt.height).startsWith('image');
+    const isDoc = fmt.height === 'doc';
+    const outFile = path.join(jobDir, isImage ? `${base}-${fmt.height}.jpg` : `${base}.${isDoc ? 'pdf' : 'mp4'}`);
+    const { type } = await downloadToFile(fmt.fileUrl, outFile, (got, total) => { if (total) job.progress = Math.min(99, Math.round(got / total * 100)); else job.progress = 50; });
+    // The image CDN always serves JPEG; if it ever says otherwise,
+    // rename to the right extension so the file opens correctly.
+    if (isImage && type) {
+      const realExt = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : (type.includes('jpeg') || type.includes('jpg')) ? 'jpg' : null;
+      if (realExt && realExt !== 'jpg') { try { fs.renameSync(outFile, outFile.replace(/\.jpg$/, '.' + realExt)); } catch {} }
+    }
+    finishJob(job, jobDir, null);
+  } catch (e) {
+    job.status = 'error';
+    job.error = 'This LinkedIn post could not be downloaded. The link may be wrong, or the post is private.';
+    pumpQueue();
+  }
+}
 function isDirectMedia(url) {
   try { const p = new URL(url).pathname.toLowerCase(); return /\.(mp4|webm|mov|mkv|m3u8|mp3|m4a|wav|avi)$/.test(p); } catch { return false; }
 }
@@ -431,6 +631,12 @@ function pickJobFile(job, jobDir) {
     if (urlExt) pool = files.filter(f => path.extname(f).toLowerCase() === urlExt);
   }
   if (!pool.length && job.quality === 'audio') pool = files;
+  // LinkedIn image/document jobs: the finished file is a .jpg/.png/
+  // .webp image or a .pdf, never a video — so the video pool above is
+  // empty by design. (Only these qualities take this branch, so a
+  // video job that produced no video still errors instead of serving
+  // a stray thumbnail as "ready".)
+  if (!pool.length && (job.quality === 'doc' || /^image\d+$/.test(String(job.quality || '')))) pool = files.filter(f => ['.jpg', '.jpeg', '.png', '.webp', '.pdf'].includes(path.extname(f).toLowerCase()));
   if (!pool.length) return null;
   pool.sort((a, b) => fs.statSync(path.join(jobDir, b)).size - fs.statSync(path.join(jobDir, a)).size);
   return path.join(jobDir, pool[0]);
@@ -591,6 +797,9 @@ function dispatchJob(job, jobDir) {
   // the webpage from this IP, so it finds no formats at all).
   const bili = bilibiliId(url);
   if (bili && FFMPEG) { runBilibiliJob(job, jobDir); return; }
+  // LinkedIn: native direct download (yt-dlp has no LinkedIn
+  // extractor, so every LinkedIn link fails there).
+  if (linkedinPostUrl(url)) { runLinkedInJob(job, jobDir); return; }
   // Direct media: ffmpeg trick, no login/API.
   if (isDirectMedia(url) && FFMPEG) {
     const ext = new URL(url).pathname.split('.').pop().toLowerCase().split('?')[0] || 'mp4';
@@ -721,6 +930,20 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: info.thumbnail || '', platform: 'Bilibili', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: true, ffmpeg: HAS_FFMPEG });
         } catch (e) { return sendJson(res, 500, { error: 'This Bilibili video could not be found. The link may be wrong, or the video was removed.' }); }
       }
+      // LinkedIn: native resolution (yt-dlp has no LinkedIn extractor,
+      // so every LinkedIn link failed with "unsupported URL"). lnkd.in
+      // short links are resolved to the real post first.
+      let liPage = linkedinPostUrl(url);
+      if (liPage && liPage.startsWith('SHORT:')) {
+        try { liPage = linkedinPostUrl(await resolveRedirects(liPage.slice(6))); } catch { liPage = null; }
+      }
+      if (liPage) {
+        try {
+          const info = await getLinkedInInfo(liPage);
+          if (info.duration && info.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(info.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
+          return sendJson(res, 200, { title: info.title, uploader: '', duration: info.duration, thumbnail: info.thumbnail || '', platform: 'LinkedIn', formats: info.formats.map(f => ({ label: f.label, height: f.height })), hasAudio: info.mediaKind === 'video', ffmpeg: HAS_FFMPEG, mediaKind: info.mediaKind, noAudio: info.mediaKind !== 'video' });
+        } catch (e) { return sendJson(res, 500, { error: 'This LinkedIn post could not be opened. It may be private, or the link may be wrong.' }); }
+      }
       const out = await runYtDlp(['--no-playlist', '--dump-json', '--no-download', url], url);
       const j = JSON.parse(out);
       if (j.duration && j.duration > MAX_DURATION) return sendJson(res, 400, { error: `Video is too long (${Math.round(j.duration / 60)} min). Limit is ${MAX_DURATION / 60} min.` });
@@ -772,11 +995,11 @@ const server = http.createServer(async (req, res) => {
           const m = range.match(/bytes=(\d+)-(\d*)/);
           const start = m ? parseInt(m[1], 10) : 0;
           const end = m && m[2] ? parseInt(m[2], 10) : size - 1;
-          res.writeHead(206, { 'Content-Type': 'video/mp4', 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Disposition': `attachment; filename="${job.name}"` });
+          res.writeHead(206, { 'Content-Type': fileContentType(job.file), 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Disposition': `attachment; filename="${job.name}"` });
           fs.createReadStream(job.file, { start, end }).pipe(res);
                     return;
         }
-        res.writeHead(200, { 'Content-Type': job.quality === 'audio' && !HAS_FFMPEG ? 'application/octet-stream' : 'video/mp4', 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': `attachment; filename="${job.name}"` });
+        res.writeHead(200, { 'Content-Type': job.quality === 'audio' && !HAS_FFMPEG ? 'application/octet-stream' : fileContentType(job.file), 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': `attachment; filename="${job.name}"` });
         const stream = fs.createReadStream(job.file);
         stream.pipe(res);
         stream.on('close', () => {});
@@ -808,7 +1031,7 @@ const server = http.createServer(async (req, res) => {
       const wait = setInterval(() => {
         if (job.status === 'ready') {
           clearInterval(wait);
-          res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': job.size, 'Content-Disposition': `attachment; filename="${job.name}"` });
+          res.writeHead(200, { 'Content-Type': fileContentType(job.file), 'Content-Length': job.size, 'Content-Disposition': `attachment; filename="${job.name}"` });
           const s = fs.createReadStream(job.file); s.pipe(res);
         } else if (job.status === 'error') { clearInterval(wait); if (!res.headersSent) sendJson(res, 500, { error: job.error || 'Download failed.' }); }
       }, 1000);
