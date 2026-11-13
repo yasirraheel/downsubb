@@ -204,13 +204,20 @@ function downloadArgs(url, quality, outTpl) {
     // the bare `bv*+ba/b` selector can fail even when the preview
     // (which only lists formats) succeeds — the extra `/best` fallback
     // covers that case.
+    // --trim-filenames: some Facebook/TikTok titles are huge hashtag
+    // dumps; without a cap the output path exceeds the 255-byte
+    // filename limit and yt-dlp fails with "File name too long"
+    // (2026-11-13: a Facebook reel with a ~400-char title failed
+    // every download while shorter titles worked fine). 80 chars:
+    // titles carry multi-byte emoji (up to 4 bytes each), so 150
+    // chars can still exceed 255 bytes on disk.
     const h = quality === 'best' ? 1080 : (parseInt(quality, 10) || 720);
     const f = `bv*[height<=${h}]+ba/b[height<=${h}]/best[height<=${h}]/best`;
-    return ['--no-playlist', '--continue', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
+    return ['--no-playlist', '--continue', '--trim-filenames', '80', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
   }
   // No ffmpeg: single pre-merged file only, up to 720p.
   const f = quality === 'best' ? 'best[height<=720]/18/b[height<=720]/best' : `best[height<=${parseInt(quality, 10) || 720}]/b[height<=${parseInt(quality, 10) || 720}]/best`;
-  return ['--no-playlist', '--continue', '-f', f, '-o', outTpl, url];
+  return ['--no-playlist', '--continue', '--trim-filenames', '80', '-f', f, '-o', outTpl, url];
 }
 
 // ---- Beeg (native, no yt-dlp: its Beeg extractor is broken) ----
@@ -715,7 +722,16 @@ function parseProgress(job, text) {
   if (m) { const last = m[m.length - 1].match(/(\d+(?:\.\d+)?)%/); if (last) job.progress = Math.round(parseFloat(last[1])); }
 }
 function runYtDlpJob(job, jobDir) {
-  const outTpl = path.join(jobDir, '%(title)s.%(ext)s');
+  // Output template: title truncated to 40 chars IN THE TEMPLATE
+  // (%(title).40s). Some Facebook/TikTok titles are huge hashtag
+  // dumps (~400 chars with multi-byte emoji); using the raw title as
+  // the filename exceeds the 255-byte filesystem limit and yt-dlp
+  // fails with "File name too long" (2026-11-13: a Facebook reel
+  // failed every download while shorter titles worked). --trim-filenames
+  // counts characters, not bytes, so it cannot fix multi-byte titles
+  // on its own. The served download name is still derived from the
+  // file via safeName() in finishJob, so the user sees a clean name.
+  const outTpl = path.join(jobDir, '%(title).40s.%(ext)s');
   // A site sometimes briefly refuses this server's IP (TikTok answered
   // HTTP 403 on 2026-11-12 18:25 PKT for vt.tiktok.com/ZSpHogRWk, then
   // the identical download worked 3 minutes later; yt-dlp also warns
