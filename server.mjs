@@ -198,11 +198,18 @@ function downloadArgs(url, quality, outTpl) {
       : ['--no-playlist', '--continue', '-f', 'ba/b', '-o', outTpl, url];
   }
   if (HAS_FFMPEG) {
-    const f = quality === 'best' ? 'bv*[height<=1080]+ba/b[height<=1080]' : `bv*[height<=${parseInt(quality, 10) || 720}]+ba/b[height<=${parseInt(quality, 10) || 720}]`;
+    // Format selector with full fallbacks: DASH (bv+ba) first, then best
+    // single file at the wanted height, then any best. TikTok/Facebook
+    // often serve single-file MP4s with no separate audio stream, so
+    // the bare `bv*+ba/b` selector can fail even when the preview
+    // (which only lists formats) succeeds — the extra `/best` fallback
+    // covers that case.
+    const h = quality === 'best' ? 1080 : (parseInt(quality, 10) || 720);
+    const f = `bv*[height<=${h}]+ba/b[height<=${h}]/best[height<=${h}]/best`;
     return ['--no-playlist', '--continue', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
   }
   // No ffmpeg: single pre-merged file only, up to 720p.
-  const f = quality === 'best' ? 'best[height<=720]/18/b[height<=720]' : `best[height<=${parseInt(quality, 10) || 720}]/b[height<=${parseInt(quality, 10) || 720}]`;
+  const f = quality === 'best' ? 'best[height<=720]/18/b[height<=720]/best' : `best[height<=${parseInt(quality, 10) || 720}]/b[height<=${parseInt(quality, 10) || 720}]/best`;
   return ['--no-playlist', '--continue', '-f', f, '-o', outTpl, url];
 }
 
@@ -236,7 +243,7 @@ function fetchText(url, referer, extraHeaders) {
 // fetches it (it can reach the CDNs) and streams it back. Only known
 // thumbnail hosts are allowed, only images, max 5 MB, cached on disk
 // for 7 days so repeat views cost nothing.
-const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com', 'sndcdn.com', 'licdn.com'];
+const THUMB_HOSTS = ['ytimg.com', 'hdslb.com', 'xhcdn.com', 'externulls.com', 'fbcdn.net', 'cdninstagram.com', 'tiktokcdn.com', 'twimg.com', 'redd.it', 'vimeocdn.com', 'dmcdn.net', 'pinimg.com', 'userapi.com', 'vk.com', 'scdn.co', 'snapcdn.com', 'sndcdn.com', 'licdn.com', 'kick.com', 'stream.kick.com'];
 const thumbsDir = path.join(root, '.thumbs');
 fs.mkdirSync(thumbsDir, { recursive: true });
 function thumbHostOk(hostname) {
