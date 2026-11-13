@@ -169,7 +169,44 @@ function friendlyError(raw, url) {
 }
 function sendJson(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
 function readBody(req) { return new Promise((resolve, reject) => { let b = ''; req.on('data', d => { b += d; if (b.length > 10000) req.destroy(); }); req.on('end', () => resolve(b)); req.on('error', reject); }); }
-function safeName(s) { return (s || 'video').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'video'; }
+function safeName(s, ext) {
+  // Download filename from the platform title — the file the user
+  // saves must be named after the video, not "video.mp4". Only
+  // filesystem-illegal characters are stripped (/ \ : * ? " < > |
+  // and control chars); Unicode letters, emoji and spaces are KEPT
+  // (the old version stripped everything but [\w- ], so an emoji-only
+  // or non-Latin title collapsed to the generic "video"). The name is
+  // trimmed from the END only, byte-aware (Buffer.byteLength): the
+  // full filename (stem + extension) fits in 200 bytes, well under
+  // the 255-byte filesystem limit, so even a 400-char hashtag/emoji
+  // title downloads instead of failing with "File name too long".
+  // ext is the extension without the dot ('mp4'); omit it to get
+  // just the stem (capped at 195 bytes, leaving room for an extension).
+  let t = String(s || '').replace(/[\/\\:*?"<>|]/g, '').replace(/[\x00-\x1f\x7f]/g, '').replace(/\s+/g, ' ').trim().replace(/^[.\s]+/, '').replace(/[.\s]+$/, '');
+  if (!t) t = 'video';
+  const e = ext ? '.' + String(ext).replace(/^\./, '') : '';
+  const budget = (ext ? 200 : 195) - Buffer.byteLength(e);
+  const chars = [...t];
+  while (Buffer.byteLength(chars.join('')) > budget && chars.length > 1) chars.pop();
+  t = chars.join('').replace(/[.\s]+$/, '');
+  if (!t || Buffer.byteLength(t) > budget) t = 'video';
+  return t + e;
+}
+// Title yt-dlp itself resolved for a finished job (--write-info-json
+// writes download.info.json next to the file). Used by finishJob so
+// the served name is the platform title even though yt-dlp writes to
+// a fixed on-disk name.
+function ytDlpTitle(jobDir) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(jobDir, 'download.info.json'), 'utf8')); return j && j.title ? String(j.title) : null; } catch { return null; }
+}
+// Content-Disposition for a download: quoted filename for old
+// clients plus the RFC 5987 filename* form so Unicode/emoji titles
+// survive instead of being mangled by the browser.
+function contentDisposition(name) {
+  const n = String(name || 'video');
+  const ascii = n.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(n)}`;
+}
 // Content-Type for a finished job file, by extension: images and PDFs
 // (LinkedIn) must not be served as video/mp4, or some browsers and
 // apps will not open them correctly.
@@ -203,21 +240,17 @@ function downloadArgs(url, quality, outTpl) {
     // often serve single-file MP4s with no separate audio stream, so
     // the bare `bv*+ba/b` selector can fail even when the preview
     // (which only lists formats) succeeds — the extra `/best` fallback
-    // covers that case.
-    // --trim-filenames: some Facebook/TikTok titles are huge hashtag
-    // dumps; without a cap the output path exceeds the 255-byte
-    // filename limit and yt-dlp fails with "File name too long"
-    // (2026-11-13: a Facebook reel with a ~400-char title failed
-    // every download while shorter titles worked fine). 80 chars:
-    // titles carry multi-byte emoji (up to 4 bytes each), so 150
-    // chars can still exceed 255 bytes on disk.
+    // covers that case. NOTE: no --trim-filenames here — yt-dlp writes
+    // to a fixed "download.<ext>" name (see runYtDlpJob), so there is
+    // no long title for it to trim; the platform title is applied to
+    // the finished file by finishJob (byte-safe, trimmed from the end).
     const h = quality === 'best' ? 1080 : (parseInt(quality, 10) || 720);
     const f = `bv*[height<=${h}]+ba/b[height<=${h}]/best[height<=${h}]/best`;
-    return ['--no-playlist', '--continue', '--trim-filenames', '80', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
+    return ['--no-playlist', '--continue', '-f', f, '--merge-output-format', 'mp4', '-o', outTpl, url];
   }
   // No ffmpeg: single pre-merged file only, up to 720p.
   const f = quality === 'best' ? 'best[height<=720]/18/b[height<=720]/best' : `best[height<=${parseInt(quality, 10) || 720}]/b[height<=${parseInt(quality, 10) || 720}]/best`;
-  return ['--no-playlist', '--continue', '--trim-filenames', '80', '-f', f, '-o', outTpl, url];
+  return ['--no-playlist', '--continue', '-f', f, '-o', outTpl, url];
 }
 
 // ---- Beeg (native, no yt-dlp: its Beeg extractor is broken) ----
@@ -375,8 +408,9 @@ function runBilibiliJob(job, jobDir) {
   getBilibiliInfo(bilibiliId(job.url)).then(async info => {
     try {
       const { url: fileUrl, size: expectedSize } = await bilibiliFileUrl(info, job.quality);
-      const mp4File = path.join(jobDir, `${safeName(info.title)}.mp4`);
-      const mp3File = path.join(jobDir, `${safeName(info.title)}.mp3`);
+      job.title = info.title;
+      const mp4File = path.join(jobDir, safeName(info.title, 'mp4'));
+      const mp3File = path.join(jobDir, safeName(info.title, 'mp3'));
       // -reconnect: Bilibili's CDN sometimes drops the connection
       // mid-file (a test download stopped at 63/80 MB) and ffmpeg
       // still exits 0, so a truncated file would be served as ready.
@@ -579,6 +613,7 @@ async function runLinkedInJob(job, jobDir) {
     else fmt = info.formats.find(f => String(f.height) === String(q));
     if (!fmt) throw new Error('That quality is no longer available for this post.');
     job.duration = info.duration || 0;
+    job.title = info.title;
     try { fs.writeFileSync(path.join(jobDir, 'meta.json'), JSON.stringify({ url: job.url, quality: job.quality, duration: job.duration, createdAt: job.createdAt || Date.now() })); } catch {}
     const base = safeName(info.title);
     if (q === 'audio') {
@@ -636,7 +671,7 @@ function isDirectMedia(url) {
 // ".f…" is not mistaken for a part.
 const PART_FILE = /\.f(?:\d+|hls-[\w-]+|http-[\w-]+|sb\d+)\.(mp4|webm|mkv|mov)$/i;
 function pickJobFile(job, jobDir) {
-  const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp') && !PART_FILE.test(f));
+  const files = fs.readdirSync(jobDir).filter(f => fs.statSync(path.join(jobDir, f)).isFile() && f !== 'meta.json' && !f.endsWith('.info.json') && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp') && !PART_FILE.test(f));
   if (!files.length) return null;
   const videoExts = ['.mp4', '.webm', '.mkv', '.mov'];
   let pool = files.filter(f => videoExts.includes(path.extname(f).toLowerCase()));
@@ -662,7 +697,7 @@ function finishJob(job, jobDir, errText) {
     // Finished media only: ignore resume state (.part/.ytdl) and meta.json.
     const file = pickJobFile(job, jobDir);
     if (!file) {
-      const anyFile = fs.readdirSync(jobDir).some(f => f !== 'meta.json' && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
+      const anyFile = fs.readdirSync(jobDir).some(f => f !== 'meta.json' && !f.endsWith('.info.json') && !f.endsWith('.part') && !f.endsWith('.ytdl') && !f.endsWith('.temp'));
       job.status = 'error';
       job.error = anyFile ? 'The video could not be prepared (merging failed). Please try again.' : 'The download finished but no file was created.';
       pumpQueue(); return;
@@ -684,8 +719,24 @@ function finishJob(job, jobDir, errText) {
     }
     job.size = fs.statSync(file).size;
     if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; pumpQueue(); return; }
+    // The saved file is named after the platform title, not the
+    // on-disk name (yt-dlp writes "download.<ext>"). Title sources,
+    // in order: the runner that fetched it (Beeg / Bilibili /
+    // LinkedIn / direct media store it on the job), yt-dlp's
+    // info.json, then the on-disk filename as a last resort. A title
+    // that already ends in the file's extension ("clip.mp4") is
+    // trimmed so the name is not "clip.mp4.mp4". safeName trims from
+    // the end, byte-aware, so the start of the title is always kept.
+    const ext = path.extname(file).slice(1) || 'mp4';
+    let title = job.title || ytDlpTitle(jobDir) || path.basename(file, path.extname(file));
+    if (title.toLowerCase().endsWith('.' + ext.toLowerCase())) title = title.slice(0, -(ext.length + 1));
+    const newName = safeName(title, ext);
+    const newPath = path.join(jobDir, newName);
     job.file = file;
-    job.name = `${safeName(path.basename(file, path.extname(file)))}.${path.extname(file).slice(1) || 'mp4'}`;
+    if (newPath !== file) {
+      try { fs.renameSync(file, newPath); job.file = newPath; } catch { /* serve the original file */ }
+    }
+    job.name = path.basename(job.file);
     job.status = 'ready'; job.progress = 100;
   } catch (e) { job.status = 'error'; job.error = e.message; }
   pumpQueue();
@@ -722,16 +773,20 @@ function parseProgress(job, text) {
   if (m) { const last = m[m.length - 1].match(/(\d+(?:\.\d+)?)%/); if (last) job.progress = Math.round(parseFloat(last[1])); }
 }
 function runYtDlpJob(job, jobDir) {
-  // Output template: title truncated to 40 chars IN THE TEMPLATE
-  // (%(title).40s). Some Facebook/TikTok titles are huge hashtag
-  // dumps (~400 chars with multi-byte emoji); using the raw title as
-  // the filename exceeds the 255-byte filesystem limit and yt-dlp
-  // fails with "File name too long" (2026-11-13: a Facebook reel
-  // failed every download while shorter titles worked). --trim-filenames
-  // counts characters, not bytes, so it cannot fix multi-byte titles
-  // on its own. The served download name is still derived from the
-  // file via safeName() in finishJob, so the user sees a clean name.
-  const outTpl = path.join(jobDir, '%(title).40s.%(ext)s');
+  // Output template: a FIXED name, never the title. The title used to
+  // be the filename (truncated to 40 chars in the template), which cut
+  // every long title down to a stub and collapsed emoji/non-Latin
+  // titles to "video.mp4" — and a raw title can still exceed the
+  // 255-byte filesystem limit ("File name too long", 2026-11-13: a
+  // Facebook reel with a ~400-char hashtag/emoji title failed every
+  // download). yt-dlp's .40s / --trim-filenames count characters, not
+  // bytes, so they can never be byte-safe for emoji titles. Instead
+  // yt-dlp writes download.<ext> and --write-info-json records the
+  // title yt-dlp resolved; finishJob then renames the file to the
+  // byte-safe platform title (safeName, trimmed from the end) and
+  // serves that exact name. Resume still works: the name is
+  // deterministic per job.
+  const outTpl = path.join(jobDir, 'download.%(ext)s');
   // A site sometimes briefly refuses this server's IP (TikTok answered
   // HTTP 403 on 2026-11-12 18:25 PKT for vt.tiktok.com/ZSpHogRWk, then
   // the identical download worked 3 minutes later; yt-dlp also warns
@@ -751,7 +806,7 @@ function runYtDlpJob(job, jobDir) {
   // so yt-dlp retries every fragment 10x and the job sits at 0%
   // forever — proven 2026-11-12 on redtube.com/189933211). Sending
   // the page URL as Referer is standard and harmless for other sites.
-  const p = spawn(YTDLP, [...BASE_ARGS, ...siteArgs(job.url), '--referer', job.url, ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
+  const p = spawn(YTDLP, [...BASE_ARGS, ...siteArgs(job.url), '--referer', job.url, '--write-info-json', ...downloadArgs(job.url, job.quality, outTpl)], { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
   job.proc = p;
   let err = '';
   p.stdout.on('data', d => parseProgress(job, d.toString()));
@@ -784,7 +839,8 @@ function dispatchJob(job, jobDir) {
   if (bid && FFMPEG) {
     getBeegInfo(bid).then(info => {
       const variant = beegVariantFor(info, job.quality);
-      const outFile = path.join(jobDir, `${safeName(info.title)}.mp4`);
+      job.title = info.title;
+      const outFile = path.join(jobDir, safeName(info.title, 'mp4'));
       // Remember the expected duration on the job (and on disk) so
       // finishJob can reject a truncated file — including one recovered
       // after a server restart, where the close handler never runs.
@@ -826,6 +882,10 @@ function dispatchJob(job, jobDir) {
   // Direct media: ffmpeg trick, no login/API.
   if (isDirectMedia(url) && FFMPEG) {
     const ext = new URL(url).pathname.split('.').pop().toLowerCase().split('?')[0] || 'mp4';
+    // The served name is the URL's filename (same title /api/info
+    // reports); finishJob strips a trailing extension so the name
+    // is not "clip.mp4.mp4".
+    try { job.title = decodeURIComponent(new URL(url).pathname.split('/').pop().split('?')[0] || 'video'); } catch { job.title = 'video'; }
     const outFile = path.join(jobDir, `video.${ext === 'm3u8' ? 'mp4' : ext}`);
     const args = ['-y', '-user_agent', 'Mozilla/5.0', '-i', url, '-c', 'copy', outFile];
     const p = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV });
@@ -1018,11 +1078,11 @@ const server = http.createServer(async (req, res) => {
           const m = range.match(/bytes=(\d+)-(\d*)/);
           const start = m ? parseInt(m[1], 10) : 0;
           const end = m && m[2] ? parseInt(m[2], 10) : size - 1;
-          res.writeHead(206, { 'Content-Type': fileContentType(job.file), 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Disposition': `attachment; filename="${job.name}"` });
+          res.writeHead(206, { 'Content-Type': fileContentType(job.file), 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': end - start + 1, 'Content-Disposition': contentDisposition(job.name) });
           fs.createReadStream(job.file, { start, end }).pipe(res);
                     return;
         }
-        res.writeHead(200, { 'Content-Type': job.quality === 'audio' && !HAS_FFMPEG ? 'application/octet-stream' : fileContentType(job.file), 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': `attachment; filename="${job.name}"` });
+        res.writeHead(200, { 'Content-Type': job.quality === 'audio' && !HAS_FFMPEG ? 'application/octet-stream' : fileContentType(job.file), 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': contentDisposition(job.name) });
         const stream = fs.createReadStream(job.file);
         stream.pipe(res);
         stream.on('close', () => {});
@@ -1054,7 +1114,7 @@ const server = http.createServer(async (req, res) => {
       const wait = setInterval(() => {
         if (job.status === 'ready') {
           clearInterval(wait);
-          res.writeHead(200, { 'Content-Type': fileContentType(job.file), 'Content-Length': job.size, 'Content-Disposition': `attachment; filename="${job.name}"` });
+          res.writeHead(200, { 'Content-Type': fileContentType(job.file), 'Content-Length': job.size, 'Content-Disposition': contentDisposition(job.name) });
           const s = fs.createReadStream(job.file); s.pipe(res);
         } else if (job.status === 'error') { clearInterval(wait); if (!res.headersSent) sendJson(res, 500, { error: job.error || 'Download failed.' }); }
       }, 1000);
