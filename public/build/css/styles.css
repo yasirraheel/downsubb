@@ -13117,6 +13117,7 @@ h4.chameleon-item__title {
 .nav-drop{position:relative;display:inline-block}
 .nav-drop-btn{cursor:pointer}
 .header_v2{overflow:visible}
+#supported h2{text-align:center!important}
 .nav-drop-btn::after{content:"";display:inline-block;width:0;height:0;margin-left:6px;vertical-align:middle;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #555;transition:transform .2s ease}
 .nav-drop:hover .nav-drop-btn::after{transform:rotate(180deg)}
 .nav-drop-menu{display:none;position:absolute;top:100%;left:0;min-width:210px;background:#fff;border:1px solid #e6e6e6;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.12);padding:6px 0;z-index:60;text-align:left}
