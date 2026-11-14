@@ -690,6 +690,35 @@ function pickJobFile(job, jobDir) {
   pool.sort((a, b) => fs.statSync(path.join(jobDir, b)).size - fs.statSync(path.join(jobDir, a)).size);
   return path.join(jobDir, pool[0]);
 }
+// Audio loudness boost (2026-11-14, Thomas approved): TikTok and other
+// platforms serve video audio at ~64 kbps, and the app plays it louder
+// than a downloaded file sounds in a browser or gallery. After a
+// download finishes, boost the audio (volume 1.8x with a limiter so
+// peaks never clip) and re-encode it to AAC 128k; the video stream is
+// copied untouched. Measured on a real TikTok (92s): ~2.4s, mean volume
+// -15.6 to -10.2 dB, peaks capped at 0 dB. loudnorm was tested first
+// and does NOT help (it made the test video quieter, -15.6 to -16.9 dB,
+// and took 6s), so it is not used. This step never fails a job: if
+// ffmpeg is missing, the file has no audio stream, or the boost fails
+// for any reason, the original file is kept as-is.
+function boostAudio(file) {
+  if (!HAS_FFMPEG) return;
+  const ext = path.extname(file).toLowerCase();
+  if (!['.mp4', '.webm', '.mkv', '.mov'].includes(ext)) return;
+  try {
+    if (FFPROBE) {
+      const probe = spawnSync(FFPROBE, ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { encoding: 'utf8', timeout: 15000 });
+      if (!probe.stdout || !probe.stdout.includes('audio')) return;
+    }
+    const tmp = file + '.boost' + ext;
+    const r = spawnSync(FFMPEG, ['-y', '-hide_banner', '-loglevel', 'error', '-i', file, '-map', '0:v', '-map', '0:a', '-c:v', 'copy', '-af', 'volume=1.8,alimiter=limit=0.95', '-c:a', 'aac', '-b:a', '128k', tmp], { encoding: 'utf8', timeout: 180000 });
+    if (r.status === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 0) {
+      fs.renameSync(tmp, file);
+    } else {
+      try { fs.unlinkSync(tmp); } catch {}
+    }
+  } catch { /* keep the original file */ }
+}
 function finishJob(job, jobDir, errText) {
   if (job.status === 'error') return;
   if (errText) { job.status = 'error'; job.error = friendlyError(errText, job.url); pumpQueue(); return; }
@@ -717,6 +746,10 @@ function finishJob(job, jobDir, errText) {
         pumpQueue(); return;
       }
     }
+    // Louder audio for the user (TikTok etc. serve ~64 kbps audio that
+    // sounds quieter than in the app): boosts the audio in place and
+    // never fails the job — boostAudio keeps the original on failure.
+    boostAudio(file);
     job.size = fs.statSync(file).size;
     if (job.size > MAX_BYTES) { job.status = 'error'; job.error = 'File is too large to send (over 2 GB).'; pumpQueue(); return; }
     // The saved file is named after the platform title, not the
