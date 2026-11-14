@@ -33,7 +33,7 @@
     <link rel="preload" href="/font/fonts.css?v=9" as="style">
     <link rel="stylesheet" href="/font/fonts.css?v=9" media="print" onload="this.media='all'">
 
-    <link rel="stylesheet" href="/build/css/styles.css?v=15">
+    <link rel="stylesheet" href="/build/css/styles.css?v=16">
 
 
     <link rel="manifest" href="/manifest.json">
@@ -569,6 +569,15 @@ body{padding-top:63px}
     
 <script src="/js/libs/jquery-3.6.0.min.js"></script>
 <script src="/subdown.v3.js?v=27"></script>
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+  document.querySelectorAll('.nav-drop-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      btn.closest('.nav-drop').classList.toggle('open');
+    });
+  });
+});
+</script>
 </body>
 
 </html>
