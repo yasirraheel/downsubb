@@ -89,8 +89,11 @@ const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 // is required for the server itself: yt-dlp + Deno (JS challenge
 // solver, ~/bin/deno on Hostinger) + ffmpeg are all self-contained.
 // The android player client is what got YouTube working from a clean
-// server IP; the web client is used when cookies are present, because
-// android does not support cookies.
+// server IP; do NOT force player_client=web when cookies are present.
+// Proven 2026-11-16 on ytdown.cineworm.org: web + cookies returns
+// storyboard/images only ("Requested format is not available"), while
+// cookies with yt-dlp's default client returns full formats to 2160p.
+// Android does not support cookies, so it is only used with no cookies.
 // The cookies file is a whole-browser export: it holds YouTube login
 // cookies AND stale session cookies for TikTok, Instagram, X, etc.
 // Sending those stale TikTok cookies (msToken, ttwid, tt_csrf_token)
@@ -103,7 +106,7 @@ function siteArgs(url) {
   try {
     const h = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
     if (h.includes('youtube') || h === 'youtu.be') {
-      return COOKIES_FILE ? ['--extractor-args', 'youtube:player_client=web', '--cookies', COOKIES_FILE] : ['--extractor-args', 'youtube:player_client=android'];
+      return COOKIES_FILE ? ['--cookies', COOKIES_FILE] : ['--extractor-args', 'youtube:player_client=android'];
     }
   } catch {}
   return [];
